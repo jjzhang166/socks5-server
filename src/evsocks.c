@@ -27,6 +27,9 @@ server replies:
 #include <arpa/inet.h>
 #endif
 
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
 #include <event2/listener.h>
@@ -49,6 +52,7 @@ debug_ntoa(uint32_t address)
   return buf;
 }
 
+
 static void
 reader_func(struct bufferevent *bev, void *ctx)
 {
@@ -57,7 +61,7 @@ reader_func(struct bufferevent *bev, void *ctx)
   size_t len;
   static int times = 0;
   ev_ssize_t evsize;
-
+  
   partner = ctx;
   src = bufferevent_get_input(bev);
   len = evbuffer_get_length(src); 
@@ -95,35 +99,39 @@ reader_func(struct bufferevent *bev, void *ctx)
     evbuffer_drain(src, len);
     return;
   }
-
   bufferevent_free(bev);
 }
 
 static void
 handle_addrspec(unsigned char * buffer)
 {
-  uint8_t spec = buffer[3];
+  struct addrspec *spec = malloc(sizeof(spec)); /* allocate memory for spec */
+  uint8_t atype = buffer[3];
   int buflen;
-  unsigned char v4addr[4];
+  unsigned char  v4addr[4];
+  uint32_t addr;
   unsigned char v6addr[16];
   unsigned char *domain;
   unsigned int domlen;
   unsigned char port[2]; /* two bytes for port */
-  
-  switch(spec) {
+  uint16_t _port;  
+
+  switch(atype) {
   case IPV4:
     buflen = 8;
-    memcpy(v4addr, buffer+4, sizeof(unsigned char) * 4);
-    printf("[size: %ld]\n", sizeof(v4addr));
-    uint32_t a[4] = {v4addr[0], v4addr[1], v4addr[2], v4addr[3]};
-    printf("[address: %s]\n", debug_ntoa(a));
+    memcpy(v4addr, buffer+4, 4);    
+    addr = (uint32_t)v4addr[0] << 24|
+           (uint32_t)v4addr[1] << 16|
+           (uint32_t)v4addr[2] << 8|
+           (uint32_t)v4addr[3];
+    const char *debug;
+    debug = debug_ntoa(addr);
+    strcpy((*spec).address, debug);    
     break;
   case IPV6:
     buflen = 12;
     memcpy(v6addr, buffer+4, sizeof(unsigned char) * 16);
-    printf("[size: %ld]\n", sizeof(v4addr));
-    printf("[first: %d]\n", v4addr[0]);
-    printf("[address: %s]\n", v4addr);    
+
     break;
   case _DOMAINNAME:
     domlen = (int) buffer[4];
@@ -132,11 +140,17 @@ handle_addrspec(unsigned char * buffer)
     memcpy(domain, buffer+4, sizeof(unsigned char) * domlen);
     printf("[domain: %s]\n", domain);
     printf("[length: %d]\n", domlen);
-    break;    
+    break;
+  default:
+    fprintf(stderr, "[ERROR: unknow command: %d]\n", atype);
+    return;
   }
   memcpy(port, buffer+buflen, sizeof(unsigned char) * 2); /* allocation for port */
-  printf("[PORT: %d %d ]\n", port[0], port[1]);
-  // printf("     [PORT: %s, IP: %s %s]\n", port, v4addr, domain);
+  _port = port[0]<<8 | port[1];
+  (*spec).port = _port;
+  
+  printf("    [addrspec: %s:%d]\n", (*spec).address, (*spec).port);
+  free(spec);
 }
 
 static void
@@ -208,16 +222,18 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 {
   struct bufferevent *src = ctx;
   
-  if (what & (BEV_EVENT_READING|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_READING|BEV_EVENT_ERROR|BEV_EVENT_WRITING)) {
     if (what & BEV_EVENT_ERROR) {
       puts("BEV_EVENT_ERROR");
-
       if (errno)
 	perror("connection error");
     }
     if (what & BEV_EVENT_READING) { /* send reply message to clinets here */
       puts("reading now");
       /* invoke new events here */
+    }
+    if (what & BEV_EVENT_WRITING) {
+      puts("I'm writing sth...");
     }
     
     if (src) {
@@ -257,14 +273,6 @@ listener_func(struct evconnlistener *listener, evutil_socket_t fd,
 }
 
 static void
-logfn(int is_warn, const char *msg)
-{
-  if (!is_warn && !verbose)
-    return;
-  fprintf(stderr, "[%s: %s]\n", is_warn?"WARN":"INFO", msg);
-}
-
-static void
 syntax(void)
 {
   printf("evsocks [--help] [-v] [-h] [--host] [-p] [--port] <listen-on-addr> <port>\n");
@@ -283,6 +291,7 @@ main(int argc, char **argv)
   static struct sockaddr_storage listen_on_addr;
   struct event_base *base;
   struct evconnlistener *listener;  
+  /* mode_t fperms = S_IRUSR|S_IWUSR; */
   
   if (argc < 3)
     syntax();
@@ -313,7 +322,7 @@ main(int argc, char **argv)
     if (strcmp(argv[i], "--help") == 0)
       syntax();
   }
-  
+
  /* TODO: let users chagne host */
   fprintf(stderr, "Server is up and running 0.0.0.0:%s\n", argv[has_port]);
   
@@ -344,8 +353,11 @@ main(int argc, char **argv)
 				     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE, -1,
 				     (struct sockaddr*)&listen_on_addr,
 				     socklen);
+  
   if (!listener)
     error_exit("evconlistner_new_bind");
+  
+  /*  */
 
   /* TODO: Add singal to stop a server */
   event_base_dispatch(base);
