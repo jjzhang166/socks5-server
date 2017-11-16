@@ -1,8 +1,6 @@
 #ifndef EVFUNC_H
 #define EVFUNC_H
 
-#include <arpa/inet.h>
-
 extern unsigned char * get_socks_header(void );
 
 static void reader_func(struct bufferevent *bev, void *ctx);
@@ -19,14 +17,15 @@ static void handle_bind(unsigned char * buffer, ev_ssize_t evsize);
 
 static void handle_udpassoc(void);
 
-/* handle_spec inspects address types. */
-static void handle_addrspec(unsigned char * buffer);
-
-static const char * debug_ntoa(uint32_t address);
+static const char * ntov4a(uint32_t address);
 
 struct addrspec {
   const char *address;
+  const char *domain;
   uint16_t port;
 };
+
+/* handle_spec inspects address types. */
+struct addrspec * handle_addrspec(unsigned char * buffer);
 
 #endif
