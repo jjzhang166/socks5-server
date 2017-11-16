@@ -40,7 +40,7 @@ server replies:
 #include "evfunc.h"
 
 static const char *
-debug_ntoa(uint32_t address)
+ntov4a(uint32_t address)
 {
   static char buf[32];
   uint32_t a = ntohl(address);
@@ -51,7 +51,6 @@ debug_ntoa(uint32_t address)
 		  (int)(uint8_t)((a	)&0xff));
   return buf;
 }
-
 
 static void
 reader_func(struct bufferevent *bev, void *ctx)
@@ -94,72 +93,98 @@ reader_func(struct bufferevent *bev, void *ctx)
       }
   }
 
-  if (!partner) {
+  if (!partner)
+    {
     puts("drain");
     evbuffer_drain(src, len);
     return;
-  }
+    }
+  
   bufferevent_free(bev);
 }
 
-static void
+struct addrspec *
 handle_addrspec(unsigned char * buffer)
 {
-  struct addrspec *spec = malloc(sizeof(spec)); /* allocate memory for spec */
+  struct addrspec *spec;
+  const char *ipaddr;
   uint8_t atype = buffer[3];
   int buflen;
   unsigned char  v4addr[4];
   uint32_t addr;
   unsigned char v6addr[16];
-  unsigned char *domain;
-  unsigned int domlen;
+  char *domain;
+  int domlen;
   unsigned char port[2]; /* two bytes for port */
   uint16_t _port;  
 
+  spec = (struct addrspec*)calloc(1, sizeof(spec)); /* allocate memory */
+  if (!spec)
+    fprintf(stderr, "[ERROR: Insufficient memory.\\n");
+  
   switch(atype) {
   case IPV4:
     buflen = 8;
-    memcpy(v4addr, buffer+4, 4);    
+    memcpy(v4addr, buffer+4, 4);
     addr = (uint32_t)v4addr[0] << 24|
            (uint32_t)v4addr[1] << 16|
            (uint32_t)v4addr[2] << 8|
            (uint32_t)v4addr[3];
-    const char *debug;
-    debug = debug_ntoa(addr);
-    (*spec).address = malloc(sizeof(uint32_t));
-    (*spec).address = debug;
+    ipaddr = ntov4a(addr);
+    
+    if (((*spec).address = (char*)calloc(1, sizeof(char)*4)) == NULL)
+      return NULL;
+    (*spec).address = ipaddr;
     break;
   case IPV6:
     buflen = 12;
     memcpy(v6addr, buffer+4, sizeof(unsigned char) * 16);
     break;
   case _DOMAINNAME:
-    domlen = (int) buffer[4];
+    domlen = buffer[4];
     buflen = domlen + 5;
-    domain = malloc(sizeof(unsigned char) * domlen);
-    memcpy(domain, buffer+4, sizeof(unsigned char) * domlen);
-    printf("[domain: %s]\n", domain);
-    printf("[length: %d]\n", domlen);
+    
+    if ((domain = (char*)calloc(1, sizeof(char)*buflen)) == NULL)
+      return NULL;
+	
+    memcpy(domain, buffer+5, sizeof(char) * domlen+1);
+    (*spec).domain = domain;    
+
     break;
   default:
     fprintf(stderr, "[ERROR: unknow command: %d]\n", atype);
-    return;
+    return NULL;
   }
-  memcpy(port, buffer+buflen, sizeof(unsigned char) * 2); /* allocation for port */
+  memcpy(port, buffer+buflen, sizeof(unsigned char)*2); /* allocation for port */
   _port = port[0]<<8 | port[1];
-  (*spec).port = _port;  
-  printf("    [addrspec: %s:%d]\n", (*spec).address, (*spec).port);
-  free(spec);
+  (*spec).port = _port;
+
+  return spec;
 }
 
 static void
 handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t evsize)
 {
+  struct addrspec *spec;
+  
+  if ((spec = (struct addrspec*)calloc(1, sizeof(struct addrspec))) == NULL)
+    return;
+  
   for (unsigned char i = 0; i < evsize; ++i) {
     printf("%d ", buffer[i]);	
   }
   puts(" ");
-  handle_addrspec(buffer);
+  
+  if ((spec = handle_addrspec(buffer)) == NULL) {
+    puts("NULL!");
+    return;
+  }
+
+  if (((*spec).domain == NULL))
+    printf("[INFO: %s:%d]\n", (*spec).address, (*spec).port);
+  else
+    printf("[INFO: %s:%d]\n", (*spec).domain, (*spec).port);
+  
   send_reply(bev, (uint8_t) SUCCESSED);
 }
 
@@ -239,8 +264,8 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       reader_func(bev, ctx);
     }
   }
-  
-  bufferevent_free(bev);
+
+  bufferevent_free(bev); 
 }
 
 static void
