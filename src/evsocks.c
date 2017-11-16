@@ -66,7 +66,7 @@ reader_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);
   len = evbuffer_get_length(src); 
   
-  if (len != 0) { // got some kind of response
+  if (len != 0) { /* got some kind of request */
       times++;
       printf("length: %ld, called %d time(s)\n", len, times);
       /* send data depending on the reply */
@@ -78,7 +78,7 @@ reader_func(struct bufferevent *bev, void *ctx)
 	bufferevent_free(bev);
 	return;
       }
-      
+
       switch (buffer[1]) { /* handle socks commands */
       case CONNECT:
       	handle_connect(bev, buffer, evsize);
@@ -126,12 +126,12 @@ handle_addrspec(unsigned char * buffer)
            (uint32_t)v4addr[3];
     const char *debug;
     debug = debug_ntoa(addr);
-    strcpy((*spec).address, debug);    
+    (*spec).address = malloc(sizeof(uint32_t));
+    (*spec).address = debug;
     break;
   case IPV6:
     buflen = 12;
     memcpy(v6addr, buffer+4, sizeof(unsigned char) * 16);
-
     break;
   case _DOMAINNAME:
     domlen = (int) buffer[4];
@@ -147,8 +147,7 @@ handle_addrspec(unsigned char * buffer)
   }
   memcpy(port, buffer+buflen, sizeof(unsigned char) * 2); /* allocation for port */
   _port = port[0]<<8 | port[1];
-  (*spec).port = _port;
-  
+  (*spec).port = _port;  
   printf("    [addrspec: %s:%d]\n", (*spec).address, (*spec).port);
   free(spec);
 }
@@ -171,7 +170,7 @@ handle_bind(unsigned char *buffer, ev_ssize_t evsize)
     printf("%d ", buffer[i]);	
   }
   puts(" ");
-  
+
   send_reply(NULL, (uint8_t) SUCCESSED);
 }
 
