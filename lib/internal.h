@@ -20,6 +20,8 @@
 
 void error_exit(const char *format, ...) NORETURN;
 
+
+
 /* socks version  */
 #define SOCKS_VERSION 5
 

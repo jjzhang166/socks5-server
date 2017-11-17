@@ -39,18 +39,6 @@ server replies:
 #include "internal.h"
 #include "evfunc.h"
 
-static const char *
-ntov4a(uint32_t address)
-{
-  static char buf[32];
-  uint32_t a = ntohl(address);
-  evutil_snprintf(buf, sizeof(buf), "%d.%d.%d.%d",
-		  (int)(uint8_t)((a>>24)&0xff),
-		  (int)(uint8_t)((a>>16)&0xff),
-		  (int)(uint8_t)((a>>8 )&0xff),
-		  (int)(uint8_t)((a	)&0xff));
-  return buf;
-}
 
 static void
 reader_func(struct bufferevent *bev, void *ctx)
@@ -185,7 +173,7 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t evsize
   else
     printf("[INFO: %s:%d]\n", (*spec).domain, (*spec).port);
   
-  send_reply(bev, (uint8_t) SUCCESSED);
+  send_reply(bev, SUCCESSED);
 }
 
 static void
@@ -196,7 +184,7 @@ handle_bind(unsigned char *buffer, ev_ssize_t evsize)
   }
   puts(" ");
 
-  send_reply(NULL, (uint8_t) SUCCESSED);
+  send_reply(NULL, SUCCESSED);
 }
 
 static void
@@ -208,20 +196,35 @@ handle_udpassoc(void)
 static void
 send_reply(struct bufferevent *bev, uint8_t reply)
 {
-  unsigned char *response;
-  // size_t res_size;
-
+  const char *response;
+  size_t res_size;
+  
+  res_size = sizeof(get_socks_header());
+  
+  if ((response = (char*)calloc(1, sizeof(char)* 16)) == NULL)
+    return;
+ 
   response = get_socks_header();
-  // res_size = sizeof(response);
-  response[1] = reply;
+  
+  printf("gonna send this: %s\n", response);
+  
+  // response[1] = reply; some kind of copy??? from response
   puts("send_reply");
+  if ( bev == NULL) {
+    puts("bev is null");
+    return;
+  }
+  bufferevent_write(bev, response, res_size);
 }
 
-unsigned char *
+static const char *
 get_socks_header(void)
 {
-  static unsigned char buffer[7]; /* 7 bytes */
+  char *buffer;  
   uint8_t socks_version = 5;
+
+  if ((buffer = (char*)calloc(1, sizeof(uint8_t)*16)) == NULL) /* size is estimated.. */
+    return NULL;
   
   socks_version = (uint8_t) 5;
   
@@ -237,7 +240,7 @@ get_socks_header(void)
   
   buffer[7] = (uint8_t) 0; /* bind port */
   buffer[8] = (uint8_t) 0; /* bind port */
-
+  printf("    [INFO: buffer: %s]\n", buffer);
   return buffer;
 }
 
@@ -277,11 +280,14 @@ listener_func(struct evconnlistener *listener, evutil_socket_t fd,
   // struct evbuffer *evb;
 
   char serveraddr[INET_ADDRSTRLEN] = "127.0.0.1";   /* server address */
-  unsigned char *header; /* socks5 header this is an estimated size */
+  const char *header; /* socks5 header this is an estimated size */
   size_t bufsize;
 
   struct sockaddr_in ss;
   inet_pton(AF_INET, serveraddr, &(ss.sin_addr));
+
+  if ((header = calloc(1, sizeof(char)*7)) == NULL)
+    return;
   
   header = get_socks_header();
   bufsize = sizeof(header);
@@ -381,12 +387,24 @@ main(int argc, char **argv)
   if (!listener)
     error_exit("evconlistner_new_bind");
   
-  /*  */
-
   /* TODO: Add singal to stop a server */
   event_base_dispatch(base);
   evconnlistener_free(listener);
   event_base_free(base);
   printf("done\n");
   exit(EXIT_SUCCESS);
+}
+
+
+static const char *
+ntov4a(uint32_t address)
+{
+  static char buf[32];
+  uint32_t a = ntohl(address);
+  evutil_snprintf(buf, sizeof(buf), "%d.%d.%d.%d",
+		  (int)(uint8_t)((a>>24)&0xff),
+		  (int)(uint8_t)((a>>16)&0xff),
+		  (int)(uint8_t)((a>>8 )&0xff),
+		  (int)(uint8_t)((a	)&0xff));
+  return buf;
 }
