@@ -1,7 +1,7 @@
 #ifndef EVFUNC_H
 #define EVFUNC_H
 
-extern unsigned char * get_socks_header(void );
+static const char * get_socks_header(void );
 
 static void reader_func(struct bufferevent *bev, void *ctx);
 
@@ -20,9 +20,10 @@ static void handle_udpassoc(void);
 static const char * ntov4a(uint32_t address);
 
 struct addrspec {
-  const char *address;
   const char *domain;
-  uint16_t port;
+  unsigned long s_addr;
+  unsigned char *_s6_addr;
+  uint16_t port; /* load with shift operator. otherwise endianness will be messed.. */
 };
 
 /* handle_spec inspects address types. */

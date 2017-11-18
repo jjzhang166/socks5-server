@@ -57,7 +57,7 @@ reader_func(struct bufferevent *bev, void *ctx)
       times++;
       printf("length: %ld, called %d time(s)\n", len, times);
       /* send data depending on the reply */
-      unsigned  char buffer[len]; // got output from partner
+      unsigned char buffer[len]; // got output from partner
       evsize = evbuffer_copyout(src, buffer, len);
       
       if (buffer[0] != (uint8_t) SOCKS_VERSION) {
@@ -95,12 +95,16 @@ struct addrspec *
 handle_addrspec(unsigned char * buffer)
 {
   struct addrspec *spec;
-  const char *ipaddr;
+
   uint8_t atype = buffer[3];
   int buflen;
-  unsigned char  v4addr[4];
-  uint32_t addr;
-  unsigned char v6addr[16];
+  uint32_t v4addr;
+  
+  unsigned char  ip4[4];
+  unsigned char ip6[16];
+  
+  unsigned long s_addr;
+
   char *domain;
   int domlen;
   unsigned char port[2]; /* two bytes for port */
@@ -113,20 +117,26 @@ handle_addrspec(unsigned char * buffer)
   switch(atype) {
   case IPV4:
     buflen = 8;
-    memcpy(v4addr, buffer+4, 4);
-    addr = (uint32_t)v4addr[0] << 24|
-           (uint32_t)v4addr[1] << 16|
-           (uint32_t)v4addr[2] << 8|
-           (uint32_t)v4addr[3];
-    ipaddr = ntov4a(addr);
+    /* memcpy(ip4, buffer+4, 4); */
+    memcpy(ip4, buffer+4, sizeof(ip4));
+    v4addr = (uint32_t)ip4[0] << 24|
+           (uint32_t)ip4[1] << 16|
+           (uint32_t)ip4[2] << 8|
+           (uint32_t)ip4[3];
+    s_addr = htonl(v4addr);
     
-    if (((*spec).address = (char*)calloc(1, sizeof(char)*4)) == NULL)
-      return NULL;
-    (*spec).address = ipaddr;
+    (*spec).s_addr = s_addr;
+    
     break;
   case IPV6:
-    buflen = 12;
-    memcpy(v6addr, buffer+4, sizeof(unsigned char) * 16);
+    buflen = 20;
+    memcpy(&ip6, buffer+4, sizeof(ip6));
+    
+    if (((*spec)._s6_addr = (unsigned char*)calloc(1, sizeof(ip6))) == NULL)
+      return NULL;
+    
+    (*spec)._s6_addr = ip6;
+
     break;
   case _DOMAINNAME:
     domlen = buffer[4];
@@ -143,10 +153,10 @@ handle_addrspec(unsigned char * buffer)
     fprintf(stderr, "[ERROR: unknow command: %d]\n", atype);
     return NULL;
   }
+  
   memcpy(port, buffer+buflen, sizeof(unsigned char)*2); /* allocation for port */
   _port = port[0]<<8 | port[1];
   (*spec).port = _port;
-
   return spec;
 }
 
@@ -154,6 +164,10 @@ static void
 handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t evsize)
 {
   struct addrspec *spec;
+
+  /* ip4 and ip6 are for presentation */
+  char ip4[INET_ADDRSTRLEN];
+  char ip6[INET6_ADDRSTRLEN];
   
   if ((spec = (struct addrspec*)calloc(1, sizeof(struct addrspec))) == NULL)
     return;
@@ -168,9 +182,18 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t evsize
     return;
   }
 
-  if (((*spec).domain == NULL))
-    printf("[INFO: %s:%d]\n", (*spec).address, (*spec).port);
-  else
+  if
+    (((*spec).domain == NULL))
+    {
+      if (!(*spec).s_addr) { /* print out ip6 */
+	inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN);
+	printf("[INFO: %s:%d]\n", ip6, (*spec).port);
+      }
+      else { /* print out ip4 */
+	inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN);
+	printf("[INFO: %s:%d]\n", ip4, (*spec).port);
+      }
+    } else /* print out domain */
     printf("[INFO: %s:%d]\n", (*spec).domain, (*spec).port);
   
   send_reply(bev, SUCCESSED);
@@ -240,7 +263,6 @@ get_socks_header(void)
   
   buffer[7] = (uint8_t) 0; /* bind port */
   buffer[8] = (uint8_t) 0; /* bind port */
-  printf("    [INFO: buffer: %s]\n", buffer);
   return buffer;
 }
 
