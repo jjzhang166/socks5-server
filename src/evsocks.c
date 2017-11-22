@@ -40,32 +40,6 @@ server replies:
 #include <event2/util.h>
 #include <event2/event.h>
 
-#define SOCKS_VERSION 5
- /* address type */
-#define IPV4 1
-#define IPV6 4
-#define _DOMAINNAME 3
-
- 
-static struct event_base *base;
-static void syntax(void);
-static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
-static void read_func(struct bufferevent *bev, void *ctx);
-static void event_func(struct bufferevent *bev, short what, void *ctx);
-static void handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize);
-
-struct addrspec *
-handle_addrspec(unsigned char * buffer);
-char * get_socks_header(char cmd);
-
-struct addrspec {
-  short sin_family;
-  unsigned char *domain;
-  unsigned long s_addr;
-  unsigned char *_s6_addr;
-  unsigned short port; /* load with shift operator. otherwise endianness will be messed.. */
-};
-
 char *
 get_socks_header(char cmd)
 {
@@ -86,17 +60,16 @@ get_socks_header(char cmd)
   return buffer;
 }
 
-/* event status */  
-/* handling data = 1 */
-/* writing data to dst = 2*/
-static int status = 0;
-
 static void
 read_func(struct bufferevent *bev, void *ctx)
 {
   struct evbuffer *src;
   ev_ssize_t esize;
   size_t len;
+
+  struct addrspec *spec = malloc(sizeof(struct addrspec));
+
+  unsigned char *reqbuf; /* reqbuf will data send by clients */
   
   /* this is definitely temporary */
   unsigned char payload[12] = {5, 0, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
@@ -116,12 +89,12 @@ read_func(struct bufferevent *bev, void *ctx)
     case CONNECT:
       puts("connect");
       evbuffer_drain(src, 3); /* cut 3 bytes */
-      handle_connect(bev, buffer, esize);
+      spec = handle_connect(bev, buffer, esize);
       break;
     case BIND:
       puts("bind");
       evbuffer_drain(src, 4); /* cut 4 bytes */
-      handle_connect(bev, buffer, esize);      
+      spec = handle_connect(bev, buffer, esize);      
       break;
     case UDPASSOC:
       puts("udp associate");
@@ -273,7 +246,7 @@ handle_addrspec(unsigned char * buffer)
   return spec;
 }
 
-void
+struct addrspec *
 handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
 {
   struct addrspec *spec = malloc(sizeof(struct addrspec));
@@ -295,11 +268,11 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
   puts("]");
 
   if (esize <=4 )
-    return; /* nothing to get from this buffer */
+    return NULL; /* nothing to get from this buffer */
   
   spec = handle_addrspec(buffer);
   if ((spec == NULL)) {
-    return;
+    return NULL;
   }
 
   /* going to present address */
@@ -323,6 +296,8 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
   }
   /* drain a read buffer */
   evbuffer_drain(src, len);
+
+  return spec;
 }
 
 static void
