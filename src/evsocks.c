@@ -70,7 +70,7 @@ read_func(struct bufferevent *bev, void *ctx)
   ev_ssize_t esize;
   size_t len;
 
-  struct addrspec *spec = malloc(sizeof(struct addrspec));
+  static struct addrspec *spec;
 
   unsigned char *reqbuf; /* reqbuf will data send by clients */
   
@@ -89,21 +89,26 @@ read_func(struct bufferevent *bev, void *ctx)
     
     /* start to parse data */
     switch (buffer[1]) {
+      
     case CONNECT:
       puts("connect");
       evbuffer_drain(src, 3); /* cut 3 bytes */
       spec = handle_connect(bev, buffer, esize);
       break;
+      
     case BIND:
       puts("bind");
       evbuffer_drain(src, 4); /* cut 4 bytes */
       spec = handle_connect(bev, buffer, esize);      
       break;
+      
     case UDPASSOC:
       puts("udp associate");
       // handle_udpassoc();
       break;
+      
     default:
+      status = SDESTORY;
       fprintf(stderr, "[ERROR: read_func.switch cmd not supported]\n");
     }
     /* send an initial reply */
@@ -112,8 +117,6 @@ read_func(struct bufferevent *bev, void *ctx)
       bufferevent_free(bev);
       bufferevent_disable(bev, EV_READ);    
     }
-    
-    printf("[ esize=%ld len=%ld ]\n", esize, len);
     
     if (esize <= 4) {
       puts("buffer <= 4");
@@ -126,13 +129,13 @@ read_func(struct bufferevent *bev, void *ctx)
       
     case SREAD:
       puts("[INFO: read_func.SREAD]");
-      debug_addr(spec);    
+      debug_addr(spec);
       status = SWRITE;
       break;
     
     case SWAIT: /* swaits does nothing other than wait */
       puts("[INFO: drain then read_func.SWAIT]");
-      status = SREAD;      
+      status = SREAD;
       break;
     
     case SWRITE:      
@@ -145,18 +148,58 @@ read_func(struct bufferevent *bev, void *ctx)
       bufferevent_disable(bev, EV_READ);
       break;
     }
-  } else if (!(status == STAYSTILL)){
-    printf(">>>2 status=%d\n", status);
-    reqbuf = (unsigned char*)malloc(esize);
+    
+  } else if (status == SWRITE) {
+    
+    printf(">>>spec.family=%d<<<\n", (*spec).sin_family);
+    struct bufferevent *new_event;
+    new_event = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+
+    reqbuf = (unsigned char*)malloc(esize); /* data to send */
     reqbuf = buffer;
+    
     puts(">>DATA ");
     for (int i = 0; i < esize; i++)
       printf("%c", reqbuf[i]);
     puts("<<EOF");
+    
+    if ((*spec).sin_family == AF_INET) { /* in case IPv4 */
+      
+      struct sockaddr_in ip4addr;
+      ip4addr.sin_family = (*spec).sin_family;      
+      if (inet_pton(AF_INET, fetch_addr(spec), &(ip4addr.sin_addr)) == -1)
+	error_exit("read_func.inet_pton AF_INET");      
+      ip4addr.sin_port = (*spec).port;
+      
+      if (bufferevent_socket_connect(new_event, (struct sockaddr*)&ip4addr, sizeof(ip4addr))<0)
+	error_exit("read_fcun.bufferevent_sock_connect");
+
+      puts("sockaddr4_in gets ready for connect!!");
+      
+      
+    } else if ((*spec).sin_family == AF_INET6) { /* in case IPv6 */
+      
+      struct sockaddr_in6 ip6addr;
+      ip6addr.sin6_family = (*spec).sin_family;
+      
+      if (inet_pton(AF_INET6, fetch_addr(spec), &(ip6addr.sin6_addr))<0)
+	error_exit("read_func.inet_pton AF_INET6");
+      ip6addr.sin6_port = (*spec).port;
+      puts("sockaddr_in6 gets ready for connect!!");
+            
+    } else { /* in case doamin */
+      puts(">>>>resolve address, asshole<<<<");
+    }
+
+  } else if (status == SDESTORY) {  
+    /* do nothing and free memory */
+    puts("read_func.destory");
+    bufferevent_free(bev);
+    bufferevent_disable(bev, EV_READ|EV_WRITE);
+  } else {
+    bufferevent_free(bev);
+    bufferevent_disable(bev, EV_READ|EV_WRITE);
   }
-  // bufferevent_free(bev);
-  // bufferevent_disable(bev, EV_READ);
-  
 }
 
 static void
@@ -182,6 +225,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       if (errno)
 	perror("connection error");
       // bufferevent_disable(evbuf, EV_READ|EV_WRITE);
+      status = SDESTORY;
     }
     
     if (what & BEV_EVENT_READING) {
@@ -220,7 +264,7 @@ accept_func(struct evconnlistener *listener,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   assert(cli);
   bufferevent_setcb(cli, read_func, NULL, event_func, NULL);
-  // bufferevent_setcb(dst, read_func, NULL, event_func, src);
+  // bufferevent_setcb(dst, read_func, NULL, event_func, cli);
   bufferevent_enable(cli, EV_READ|EV_WRITE);
   // bufferevent_enable(dst, EV_READ|EV_WRITE);  
 }
@@ -288,7 +332,7 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
   src = bufferevent_get_input(bev);
   len = evbuffer_get_length(src);
     
-  printf("\n[INFO: ");
+  printf("\n[INFO:in raw ");
   for (i = 0; i < esize; ++i) {
     printf("%d ", buffer[i]);	
   }
@@ -338,6 +382,46 @@ debug_addr(struct addrspec *spec)
     fprintf(stderr, "[ERROR: debug_addr Unknow family]\n");
     break;
   }
+}
+
+char *
+fetch_addr(struct addrspec *spec)
+{
+  // /* ip4 and ip6 are for presentation */
+  char ip4[INET_ADDRSTRLEN];
+  char ip6[INET6_ADDRSTRLEN];
+  char *ip;
+  
+  if (spec == NULL) {
+    fprintf(stderr, "fetch_addr spec is NULL\n");
+    return NULL;
+  }
+  
+  /* going to present address */
+  switch ((*spec).sin_family) {
+  case AF_INET:
+    if (!((inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) == NULL)) {
+      ip = malloc(INET_ADDRSTRLEN);
+      ip = ip4;
+    }
+    break;
+  case AF_INET6:
+    if (!((inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) == NULL)) {
+      ip = malloc(INET6_ADDRSTRLEN);
+      ip = ip6;
+    }
+    break;
+  case 3:
+    printf("[INFO: fetch_addr domain=%s:%d]\n", (*spec).domain, (*spec).port);
+    ip = NULL;
+    break;
+  default:
+    fprintf(stderr, "[ERROR: fetch_addr Unknow family]\n");
+    ip = NULL;
+    break;
+  }
+  
+  return ip;
 }
 
 static void
