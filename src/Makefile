@@ -7,17 +7,18 @@ IMPL_CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
 	      -W \
               -Wmissing-prototypes \
               -Wno-sign-compare \
-              -Wno-unused-parameter
+              -Wno-unused-parameter \
+	      -levent
 
 CFLAGS = ${IMPL_CFLAGS}
 
 IMPL_THREAD_FLAGS = -pthread
 
-LDLIBS = /usr/local/lib/libevent.a
-
 GEN_EXE =
 
 APP_LIB = libsocks.a
+
+LDLIBS = /usr/local/lib/libevent.a ${APP_LIB}
 
 LINUX = evsocks
 
@@ -28,8 +29,8 @@ all : ${EXE}
 allgen : ${APP_LIB} ${GEN_EXE}
 
 ${APP_LIB} : internal.c
-	${CC} -c -g ${CFLAGS} internal.c
-	${ar} rs ${APP_LIB} *.o
+	${CC} -c -g -levent internal.c 
+	${AR} rs ${APP_LIB} *.o
 
 # clean : ${RM} ${EXE} *.o
 
