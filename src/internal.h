@@ -9,6 +9,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include <event2/util.h>
+
 #ifdef __GNUC__
 
 /* This macro stops gcc -Wall complaining */
@@ -48,12 +50,11 @@ void error_exit(const char *format, ...) NORETURN;
 #define SOCKS_VERSION 5
 
 #define STAYSTILL 0
-#define SREAD     1
-#define SWRITE    2
-#define SWAIT     3
+#define SREAD     1 /* reading data that a client send */
+#define SWRITE    2 /* writing data to target that a client send */
+#define SWAIT     3 /* waiting for a next event*/
 #define SHANG     4
-#define SDESTORY  5
-
+#define SDESTORY  5 /* free all pending data */
 
 struct addrspec {
   short sin_family;
@@ -82,4 +83,7 @@ struct addrspec * handle_addrspec(unsigned char * buffer);
 char * get_socks_header(char cmd);
 
 static void debug_addr(struct addrspec *spec);
+
+char * fetch_addr(struct addrspec *spec);
+
 #endif
