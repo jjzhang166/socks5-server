@@ -47,8 +47,9 @@ void error_exit(const char *format, ...) NORETURN;
 
 #define SOCKS_VERSION 5
 
+#define STAYSTILL 0
 #define SREAD     1
-#define SWRTIE    2
+#define SWRITE    2
 #define SWAIT     3
 #define SHANG     4
 #define SDESTORY  5
@@ -62,7 +63,7 @@ struct addrspec {
   unsigned short port;
 };
 
-static int status;
+
  
 static struct event_base *base;
 
@@ -74,10 +75,11 @@ static void read_func(struct bufferevent *bev, void *ctx);
 
 static void event_func(struct bufferevent *bev, short what, void *ctx);
 
-static void handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize);
+struct addrspec * handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize);
 
 struct addrspec * handle_addrspec(unsigned char * buffer);
 
 char * get_socks_header(char cmd);
 
+static void debug_addr(struct addrspec *spec);
 #endif
