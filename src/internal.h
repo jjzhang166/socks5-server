@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <string.h>
 
+#include <event2/bufferevent.h>
 #include <event2/util.h>
 
 #ifdef __GNUC__
@@ -66,31 +67,12 @@ struct addrspec {
   unsigned short port;
 };
 
-
-
-
 static void syntax(void);
-
-static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
-
-static void read_func(struct bufferevent *bev, void *ctx);
-
-static void on_read_data(struct bufferevent *bev, void *ctx);
-
-static void on_write_data(struct bufferevent *bev, void *ctx);
 
 static void event_func(struct bufferevent *bev, short what, void *ctx);
 
-static void on_event_func(struct bufferevent *bev, short what, void *ctx);
+static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
 
-struct addrspec * handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize);
-
-struct addrspec * handle_addrspec(unsigned char * buffer);
-
-char * get_socks_header(char cmd);
-
-static void debug_addr(struct addrspec *spec);
-
-char * fetch_addr(struct addrspec *spec);
+static void async_read_func(struct bufferevent *bev, void *ctx);
 
 #endif
