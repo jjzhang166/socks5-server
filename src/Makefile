@@ -2,6 +2,16 @@
 
 PROGRAM = esocks
 
+CC = cc
+
+LDLIBS =
+
+SRC = evsocks.c internal.c handlers.c
+
+HDR = evs.hks.h internal.h handlers.h
+
+OBJ = internal.o handlers.o evsocks.o 
+
 CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -D_DEFAULT_SOURCE \
          -pedantic \
@@ -12,22 +22,16 @@ CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -Wno-unused-parameter \
 	 -levent
 
-CC = cc
-
-LDLIBS =
-
-OBJ = evsocks.o internal.o
-
 all : ${PROGRAM}
 
 .o :
-	${CC} -c ${CFLAGS} -o $@
+	${CC} -c -o $@
 
 ${PROGRAM} : ${OBJ}
 	${CC} ${CFLAGS} -o $@ ${OBJ}
 
 clean :
-	${RM} *.o
+	${RM} *.o esocks
 
 showall :
 	@echo ${EXE}
