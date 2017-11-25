@@ -44,10 +44,13 @@
 
 static int status;
 
+static struct event_base *base;
+
 static void
 read_func(struct bufferevent *bev, void *ctx)
 {
   struct evbuffer *src;
+  // struct bufferevent *new_bev = ctx; /* should have a partner */
   ev_ssize_t esize;
   size_t len;
 
@@ -129,61 +132,74 @@ read_func(struct bufferevent *bev, void *ctx)
       bufferevent_disable(bev, EV_READ);
       break;
     }
-    
+
   } else if (status == SWRITE) {
     
     printf("* spec.family=%d\n", (*spec).sin_family);
-    struct bufferevent *target;
+
+    printf("* %ld\n", len);
+    
+    struct bufferevent *new_bev;
 
     reqbuf = (unsigned char*)malloc(esize); /* data to send to target */
     reqbuf = buffer;
 
     if ((*spec).sin_family == AF_INET) { /* in case IPv4 */
-      int fd;
-      struct sockaddr_in ip4addr;
       
-      memset(&ip4addr, 0, sizeof(ip4addr));
+      struct sockaddr *sa;
+      struct sockaddr_in target;
       
-      ip4addr.sin_family = (*spec).sin_family;
+      memset(&target, 0, sizeof(target)); 
+      target.sin_family = AF_INET;       
+      target.sin_addr.s_addr = (*spec).s_addr;
+      target.sin_port = (*spec).port;
+      
+ // new_bev = bufferevent_socket_new(base, -1,
+ // 				       BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);      
+      
+      /* do address debug */
+      char debug[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, &(target.sin_addr), debug, INET_ADDRSTRLEN);
+      printf("* aa %s\n", debug);
+      /* do address debug */      
 
-      fd = socket(AF_INET, SOCK_STREAM, 0);
-      if ((evutil_make_socket_nonblocking(fd))<0)
-	error_exit("evutil_make_socket_nonblocking");
+      sa = (struct sockaddr*)&target;
 
-      if ((inet_pton(AF_INET, fetch_addr(spec), &(ip4addr.sin_addr)) == 0)) {
-	perror("inet_pton invalid address");
-      }
+      int sockfd, sent;
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      evutil_make_socket_nonblocking(sockfd);      
+      if (connect(sockfd, sa, sizeof target)<0 )
+	{
+	  perror("connect");
+	}
       
-      ip4addr.sin_port = (*spec).port;     
-      
-      if (connect(fd, (struct sockaddr* )&ip4addr, sizeof(struct sockaddr_in)<0))
-	perror("connect");           
-      
-      target = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-      
-      assert(target);
-      
-      bufferevent_setcb(target, on_read_data, NULL, on_event_func, reqbuf);
-      bufferevent_enable(target, EV_READ|EV_WRITE);
-      
-      if (target == NULL)
-	error_exit("bufferevent_socket_new");     
-      
-      // if (bufferevent_socket_connect(target, (struct sockaddr*)&ip4addr, sizeof(ip4addr))<0)
-      //  	error_exit("read_fcun.bufferevent_sock_connect");
-     
-// if (bufferevent_write(target, reqbuf, esize)<0)
-// 	error_exit("read_fcun.bufferevent_write");
-      
-      // bufferevent_enable(target, EV_WRITE);      
-      // bufferevent_disable(target, EV_READ);
-      printf("* %d\n", status);
-      
+      bufferevent_trigger_event(bev, BEV_EVENT_CONNECTED, 0);            
+      sent = send(sockfd, reqbuf, len, 0);
+      printf("* sent %d\n", sent);
+
+      bufferevent_setcb(bev, NULL, NULL, on_event_func, NULL);
+      bufferevent_enable(bev, EV_WRITE);
+      // if (bufferevent_socket_connect(new_bev, sa, sizeof(target))<0) 
+      // 	{
+      // 	  puts("* freed due to error");	  
+      // 	  bufferevent_free(new_bev);	  
+      // 	}
+      // 
+      // bufferevent_trigger_event(new_bev, BEV_EVENT_CONNECTED, 0);
+      // 
+      // if (bufferevent_write(new_bev, reqbuf, len)<0) 
+      // 	{
+      // 	  puts(" *  _write freed due to error");
+      // 	  bufferevent_free(new_bev);
+      // 	}
+      // 
+      puts("* made a connection");
+
     } else if ((*spec).sin_family == AF_INET6) { /* in case IPv6 */
-      
+
       struct sockaddr_in6 ip6addr;
       ip6addr.sin6_family = (*spec).sin_family;
-      
+
       if (inet_pton(AF_INET6, fetch_addr(spec), &(ip6addr.sin6_addr))<0)
 	error_exit("read_func.inet_pton AF_INET6");
       ip6addr.sin6_port = (*spec).port;
@@ -199,6 +215,9 @@ read_func(struct bufferevent *bev, void *ctx)
     bufferevent_free(bev);
     bufferevent_disable(bev, EV_READ|EV_WRITE);
   } else {
+
+    puts("* here");
+    
     // bufferevent_free(bev);
     // bufferevent_disable(bev, EV_READ|EV_WRITE);
   }
@@ -207,18 +226,33 @@ read_func(struct bufferevent *bev, void *ctx)
 static void
 on_read_data(struct bufferevent *bev, void *ctx)
 {
-  int i;
-  char *reqbuf;
+  puts("* on_read_data");
+}
+
+static void
+on_write_data(struct bufferevent *bev, void *ctx)
+{
+  puts("* on_write_data");
+  // bufferevent_write(bev, ctx, sizeof(payload));
+}
+
+static void
+on_event_func(struct bufferevent *bev, short what, void *ctx)
+{
   
-  reqbuf = ctx;
-  
-  puts("on_read_data");
-  puts(">");  
-  while (reqbuf != NULL) {
-    i++;
-    printf("%c", reqbuf[i]);
+  puts("* on_event_func");  
+  if (what & (BEV_EVENT_CONNECTED|BEV_EVENT_WRITING|BEV_EVENT_READING)) {
+    if (what & BEV_EVENT_CONNECTED) {
+      puts("* connected");
+    }
+    if (what & BEV_EVENT_READING) {      
+      puts("* read");      
+    }    
+    if (what & BEV_EVENT_WRITING) {
+      if (errno)
+	perror("* connection error");
+    }
   }
-  puts(">");
 }
 
 static void
@@ -235,24 +269,6 @@ close_on_flush(struct bufferevent *bev, void *ctx)
 }
 
 static void
-on_event_func(struct bufferevent *bev, short what, void *ctx)
-{
-  struct bufferevent *b = ctx;
-
-  puts("* I'm here");
-  
-  if (what & (BEV_EVENT_CONNECTED|BEV_EVENT_ERROR)) {
-    if (what & BEV_EVENT_CONNECTED) {
-      puts("* connected");
-    }
-    if (what & BEV_EVENT_ERROR) {
-      if (errno)
-	perror("* connection error");
-    }
-  }
-}
-
-static void
 event_func(struct bufferevent *bev, short what, void *ctx)
 {
   struct bufferevent *evbuf = ctx;
@@ -265,7 +281,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     }
     
     if (what & BEV_EVENT_WRITING) {
-      puts("[INFO event_func.WRITING]");
+      // puts("[INFO event_func.WRITING]");
     }
     
     if (what & BEV_EVENT_READING) {
@@ -294,14 +310,18 @@ accept_func(struct evconnlistener *listener,
 	    evutil_socket_t fd,
 	    struct sockaddr *a, int slen, void *p)
 {
-  struct bufferevent *cli;
-  cli = bufferevent_socket_new(base, fd,
+  struct bufferevent *src; //, *dst;
+  src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  assert(cli);
-  bufferevent_setcb(cli, read_func, NULL, event_func, NULL);
-  // bufferevent_setcb(dst, read_func, NULL, event_func, cli);
-  bufferevent_enable(cli, EV_READ);
-  // bufferevent_enable(dst, EV_READ|EV_WRITE);  
+  // dst = bufferevent_socket_new(base, fd,
+  // 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);  
+  assert(src); // && dst);
+  
+  bufferevent_setcb(src, read_func, NULL, event_func, NULL);
+  // bufferevent_setcb(dst, on_read_data, NULL, on_event_func, src);
+  
+  bufferevent_enable(src, EV_READ|EV_WRITE);
+  // bufferevent_enable(dst, EV_WRITE);  
 }
 
 struct addrspec *
@@ -325,6 +345,11 @@ handle_addrspec(unsigned char * buffer)
       (uint32_t)ip4[1] << 16|
       (uint32_t)ip4[2] << 8|
       (uint32_t)ip4[3];
+    // char ip[16];
+    // sprintf(ip, "%d.%d.%d.%d", ip4[0],ip4[1],ip4[2],ip4[3]);;
+    (*spec).ipv4_addr = malloc(4);
+    (*spec).ipv4_addr = ip4;    
+    
     s_addr = htonl(ipv4);
     (*spec).s_addr = s_addr;
     (*spec).sin_family = AF_INET;
@@ -352,6 +377,7 @@ handle_addrspec(unsigned char * buffer)
   memcpy(&pb, buffer+buflen, sizeof(pb));
   port = pb[0]<<8|pb[1];
   (*spec).port = port;
+  
   return spec;
 }
 
@@ -453,12 +479,8 @@ fetch_addr(struct addrspec *spec)
     buf = NULL;
     break;
   }
-
-  if (errno) {
-    perror("** inet_ntop");
-  }
   
-  printf("* addr %s<\n", buf);
+  printf("* %s\n", buf);
   return buf;
 }
 
@@ -530,8 +552,8 @@ main(int argc, char **argv)
   }
 
   listener = evconnlistener_new_bind(base, accept_func, NULL,
-				     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
-				     -1, (struct sockaddr*)&listen_on_addr, socklen);
+    LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
+			     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
     perror("evconnlistener_new_bind()");
     event_base_free(base);
@@ -542,6 +564,7 @@ main(int argc, char **argv)
   printf(" [INOF level=%d]\n", verbose);
   
   event_base_dispatch(base);
+  
   evconnlistener_free(listener);
   event_base_free(base);
 

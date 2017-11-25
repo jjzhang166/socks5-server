@@ -61,13 +61,13 @@ struct addrspec {
   short sin_family;
   unsigned char *domain;
   unsigned long s_addr;
+  unsigned char *ipv4_addr;
   unsigned char *_s6_addr;
   unsigned short port;
 };
 
 
- 
-static struct event_base *base;
+
 
 static void syntax(void);
 
@@ -76,6 +76,8 @@ static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, str
 static void read_func(struct bufferevent *bev, void *ctx);
 
 static void on_read_data(struct bufferevent *bev, void *ctx);
+
+static void on_write_data(struct bufferevent *bev, void *ctx);
 
 static void event_func(struct bufferevent *bev, short what, void *ctx);
 
