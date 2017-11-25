@@ -1,57 +1,33 @@
 # event socks5 server Makefile
 
-IMPL_CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
-	      -D_DEFAULT_SOURCE \
-	      -pedantic \
-	      -Wall \
-	      -W \
-              -Wmissing-prototypes \
-              -Wno-sign-compare \
-              -Wno-unused-parameter \
-	      -levent
+PROGRAM = esocks
 
-CFLAGS = ${IMPL_CFLAGS}
+CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
+         -D_DEFAULT_SOURCE \
+         -pedantic \
+	 -Wall \
+	 -W \
+         -Wmissing-prototypes \
+         -Wno-sign-compare \
+         -Wno-unused-parameter \
+	 -levent
 
-IMPL_THREAD_FLAGS = -pthread
+CC = cc
 
-GEN_EXE =
+LDLIBS =
 
-APP_LIB = libsocks.a
+OBJ = evsocks.o internal.o
 
-LDLIBS = /usr/local/lib/libevent.a ${APP_LIB}
+all : ${PROGRAM}
 
-LINUX = evsocks
+.o :
+	${CC} -c ${CFLAGS} -o $@
 
-EXE = ${GEN_EXE} ${LINUX}
+${PROGRAM} : ${OBJ}
+	${CC} ${CFLAGS} -o $@ ${OBJ}
 
-all : ${EXE}
-
-allgen : ${APP_LIB} ${GEN_EXE}
-
-${APP_LIB} : internal.c
-	${CC} -c -g -levent internal.c 
-	${AR} rs ${APP_LIB} *.o
-
-# clean : ${RM} ${EXE} *.o
+clean :
+	${RM} *.o
 
 showall :
 	@echo ${EXE}
-
-# include ../Makefile.inc
-# 
-# GEN_EXE =
-# 
-# LINUX = evsocks
-# 
-# EXE = ${GEN_EXE} ${LINUX}
-# 
-# all : ${EXE}
-# 
-# allgen : ${GEN_EXE}
-# 
-# LDLIBS = ${IMPL_LDLIBS} -levent
-# 
-# clean : ${RM} ${EXE} *.o
-# 
-# showall :
-# 	@echo ${EXE}
