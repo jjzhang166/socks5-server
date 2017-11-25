@@ -49,6 +49,7 @@ void error_exit(const char *format, ...) NORETURN;
 
 #define SOCKS_VERSION 5
 
+ /* internal event flags */
 #define STAYSTILL 0
 #define SREAD     1 /* reading data that a client send */
 #define SWRITE    2 /* writing data to target that a client send */
@@ -74,7 +75,11 @@ static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, str
 
 static void read_func(struct bufferevent *bev, void *ctx);
 
+static void on_read_data(struct bufferevent *bev, void *ctx);
+
 static void event_func(struct bufferevent *bev, short what, void *ctx);
+
+static void on_event_func(struct bufferevent *bev, short what, void *ctx);
 
 struct addrspec * handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize);
 

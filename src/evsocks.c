@@ -24,6 +24,7 @@
 #include <winsock2.h>
 #include <ws2tcip.h>
 #else
+
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -40,26 +41,6 @@
 #include <event2/event.h>
 
 #include "internal.h"
-
-char *
-get_socks_header(char cmd)
-{
-  static char buffer[9];
-  buffer[0] = 5;
-  buffer[0] = cmd;   
-  buffer[0] = 0;
-  buffer[0] = 1;
-  
-  buffer[0] = 0;
-  buffer[0] = 0;
-  buffer[0] = 0;
-  buffer[0] = 0;
-  
-  buffer[0] = 0;
-  buffer[0] = 0;
-  
-  return buffer;
-}
 
 static int status;
 
@@ -91,19 +72,19 @@ read_func(struct bufferevent *bev, void *ctx)
     switch (buffer[1]) {
       
     case CONNECT:
-      puts("connect");
+      puts("* connect");
       evbuffer_drain(src, 3); /* cut 3 bytes */
       spec = handle_connect(bev, buffer, esize);
       break;
       
     case BIND:
-      puts("bind");
+      puts("* bind");
       evbuffer_drain(src, 4); /* cut 4 bytes */
       spec = handle_connect(bev, buffer, esize);      
       break;
       
     case UDPASSOC:
-      puts("udp associate");
+      puts("* udp associate");
       // handle_udpassoc();
       break;
       
@@ -119,10 +100,10 @@ read_func(struct bufferevent *bev, void *ctx)
     }
     
     if (esize <= 4) {
-      puts("buffer <= 4");
+      puts("* len(buffer) <= 4");
       status = SWAIT; /* yet another socks requests */
     } else {
-      printf(">>>1 status=%d\n", status);
+      printf("* status=%d\n", status);
     }
     
     switch (status) {
@@ -151,31 +132,52 @@ read_func(struct bufferevent *bev, void *ctx)
     
   } else if (status == SWRITE) {
     
-    printf(">>>spec.family=%d<<<\n", (*spec).sin_family);
-    struct bufferevent *new_event;
-    new_event = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+    printf("* spec.family=%d\n", (*spec).sin_family);
+    struct bufferevent *target;
 
-    reqbuf = (unsigned char*)malloc(esize); /* data to send */
+    reqbuf = (unsigned char*)malloc(esize); /* data to send to target */
     reqbuf = buffer;
-    
-    puts(">>DATA ");
-    for (int i = 0; i < esize; i++)
-      printf("%c", reqbuf[i]);
-    puts("<<EOF");
-    
-    if ((*spec).sin_family == AF_INET) { /* in case IPv4 */
-      
-      struct sockaddr_in ip4addr;
-      ip4addr.sin_family = (*spec).sin_family;      
-      if (inet_pton(AF_INET, fetch_addr(spec), &(ip4addr.sin_addr)) == -1)
-	error_exit("read_func.inet_pton AF_INET");      
-      ip4addr.sin_port = (*spec).port;
-      
-      if (bufferevent_socket_connect(new_event, (struct sockaddr*)&ip4addr, sizeof(ip4addr))<0)
-	error_exit("read_fcun.bufferevent_sock_connect");
 
-      puts("sockaddr4_in gets ready for connect!!");
+    if ((*spec).sin_family == AF_INET) { /* in case IPv4 */
+      int fd;
+      struct sockaddr_in ip4addr;
       
+      memset(&ip4addr, 0, sizeof(ip4addr));
+      
+      ip4addr.sin_family = (*spec).sin_family;
+
+      fd = socket(AF_INET, SOCK_STREAM, 0);
+      if ((evutil_make_socket_nonblocking(fd))<0)
+	error_exit("evutil_make_socket_nonblocking");
+
+      if ((inet_pton(AF_INET, fetch_addr(spec), &(ip4addr.sin_addr)) == 0)) {
+	perror("inet_pton invalid address");
+      }
+      
+      ip4addr.sin_port = (*spec).port;     
+      
+      if (connect(fd, (struct sockaddr* )&ip4addr, sizeof(struct sockaddr_in)<0))
+	perror("connect");           
+      
+      target = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
+      
+      assert(target);
+      
+      bufferevent_setcb(target, on_read_data, NULL, on_event_func, reqbuf);
+      bufferevent_enable(target, EV_READ|EV_WRITE);
+      
+      if (target == NULL)
+	error_exit("bufferevent_socket_new");     
+      
+      // if (bufferevent_socket_connect(target, (struct sockaddr*)&ip4addr, sizeof(ip4addr))<0)
+      //  	error_exit("read_fcun.bufferevent_sock_connect");
+     
+// if (bufferevent_write(target, reqbuf, esize)<0)
+// 	error_exit("read_fcun.bufferevent_write");
+      
+      // bufferevent_enable(target, EV_WRITE);      
+      // bufferevent_disable(target, EV_READ);
+      printf("* %d\n", status);
       
     } else if ((*spec).sin_family == AF_INET6) { /* in case IPv6 */
       
@@ -186,27 +188,44 @@ read_func(struct bufferevent *bev, void *ctx)
 	error_exit("read_func.inet_pton AF_INET6");
       ip6addr.sin6_port = (*spec).port;
       puts("sockaddr_in6 gets ready for connect!!");
-            
+
     } else { /* in case doamin */
-      puts(">>>>resolve address, asshole<<<<");
+      puts("* address not resolved");
     }
 
   } else if (status == SDESTORY) {  
     /* do nothing and free memory */
-    puts("read_func.destory");
+    puts("* read_func.destory");
     bufferevent_free(bev);
     bufferevent_disable(bev, EV_READ|EV_WRITE);
   } else {
-    bufferevent_free(bev);
-    bufferevent_disable(bev, EV_READ|EV_WRITE);
+    // bufferevent_free(bev);
+    // bufferevent_disable(bev, EV_READ|EV_WRITE);
   }
+}
+
+static void
+on_read_data(struct bufferevent *bev, void *ctx)
+{
+  int i;
+  char *reqbuf;
+  
+  reqbuf = ctx;
+  
+  puts("on_read_data");
+  puts(">");  
+  while (reqbuf != NULL) {
+    i++;
+    printf("%c", reqbuf[i]);
+  }
+  puts(">");
 }
 
 static void
 close_on_flush(struct bufferevent *bev, void *ctx)
 {
   struct evbuffer *b = bufferevent_get_output(bev);
-
+  
   if (evbuffer_get_length(b) == 0) {
     puts("close_on_flush.flush");
     bufferevent_free(bev);
@@ -216,24 +235,41 @@ close_on_flush(struct bufferevent *bev, void *ctx)
 }
 
 static void
+on_event_func(struct bufferevent *bev, short what, void *ctx)
+{
+  struct bufferevent *b = ctx;
+
+  puts("* I'm here");
+  
+  if (what & (BEV_EVENT_CONNECTED|BEV_EVENT_ERROR)) {
+    if (what & BEV_EVENT_CONNECTED) {
+      puts("* connected");
+    }
+    if (what & BEV_EVENT_ERROR) {
+      if (errno)
+	perror("* connection error");
+    }
+  }
+}
+
+static void
 event_func(struct bufferevent *bev, short what, void *ctx)
 {
   struct bufferevent *evbuf = ctx;
       
   if (what & (BEV_EVENT_READING|BEV_EVENT_WRITING|BEV_EVENT_ERROR)) {
+
     if (what & BEV_EVENT_ERROR) {
       if (errno)
 	perror("connection error");
-      // bufferevent_disable(evbuf, EV_READ|EV_WRITE);
-      status = SDESTORY;
-    }
-    
-    if (what & BEV_EVENT_READING) {
-      puts("[INFO event_func.reading]");
     }
     
     if (what & BEV_EVENT_WRITING) {
       puts("[INFO event_func.WRITING]");
+    }
+    
+    if (what & BEV_EVENT_READING) {
+      puts("[INFO event_func.reading]");
     }
     
     if (evbuf) {
@@ -247,7 +283,6 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       } else {
 	/* We have nothing left */	
 	bufferevent_free(evbuf);
-	return;
       }
     }
     bufferevent_free(bev);
@@ -265,7 +300,7 @@ accept_func(struct evconnlistener *listener,
   assert(cli);
   bufferevent_setcb(cli, read_func, NULL, event_func, NULL);
   // bufferevent_setcb(dst, read_func, NULL, event_func, cli);
-  bufferevent_enable(cli, EV_READ|EV_WRITE);
+  bufferevent_enable(cli, EV_READ);
   // bufferevent_enable(dst, EV_READ|EV_WRITE);  
 }
 
@@ -390,7 +425,7 @@ fetch_addr(struct addrspec *spec)
   // /* ip4 and ip6 are for presentation */
   char ip4[INET_ADDRSTRLEN];
   char ip6[INET6_ADDRSTRLEN];
-  char *ip;
+  char *buf;
   
   if (spec == NULL) {
     fprintf(stderr, "fetch_addr spec is NULL\n");
@@ -400,34 +435,37 @@ fetch_addr(struct addrspec *spec)
   /* going to present address */
   switch ((*spec).sin_family) {
   case AF_INET:
-    if (!((inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) == NULL)) {
-      ip = malloc(INET_ADDRSTRLEN);
-      ip = ip4;
+    if (inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) {
+      buf = ip4;
     }
     break;
   case AF_INET6:
-    if (!((inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) == NULL)) {
-      ip = malloc(INET6_ADDRSTRLEN);
-      ip = ip6;
+    if (inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) {
+      buf = ip6;
     }
     break;
   case 3:
     printf("[INFO: fetch_addr domain=%s:%d]\n", (*spec).domain, (*spec).port);
-    ip = NULL;
+    buf = NULL;
     break;
   default:
     fprintf(stderr, "[ERROR: fetch_addr Unknow family]\n");
-    ip = NULL;
+    buf = NULL;
     break;
   }
+
+  if (errno) {
+    perror("** inet_ntop");
+  }
   
-  return ip;
+  printf("* addr %s<\n", buf);
+  return buf;
 }
 
 static void
 syntax(void)
 {
-  printf("evsocks [--help] [-v] [-h] [-p]\n");
+  printf("evsocks [--help] [-v verbose] [-h host] [-p port] [-u user] [-q password] [-c client mode] [-s server mode]\n");
   exit(EXIT_SUCCESS);
 }
 
@@ -453,7 +491,7 @@ main(int argc, char **argv)
     syntax();
   }
 
-  while ((opt = getopt(argc, argv, "vh:p:")) != -1) {
+  while ((opt = getopt(argc, argv, "vh:p:uqcs")) != -1) {
     switch (opt) {
     case 'v': ++verbose; break;
     case 'h': o.host = optarg; break;      
