@@ -20,6 +20,7 @@ CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -Wmissing-prototypes \
          -Wno-sign-compare \
          -Wno-unused-parameter \
+	 -levent_core \
 	 -levent
 
 all : ${PROGRAM}
@@ -28,7 +29,7 @@ all : ${PROGRAM}
 	${CC} -c -o $@
 
 ${PROGRAM} : ${OBJ}
-	${CC} ${CFLAGS} -o $@ ${OBJ}
+	${CC} -o $@ ${OBJ} ${CFLAGS}
 
 clean :
 	${RM} *.o esocks
