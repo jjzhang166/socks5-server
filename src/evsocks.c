@@ -40,13 +40,12 @@
 #include <event2/event.h>
 
 #include "internal.h"
-#include "handlers.h"
+#include "evsocks.h"
 
 static struct event_base *base;
 
 static int status;
 
-static void handle_perpetrators(struct bufferevent *bev);
 
 static void
 handle_perpetrators(struct bufferevent *bev)
@@ -55,7 +54,6 @@ handle_perpetrators(struct bufferevent *bev)
   puts("* version is wrong");
   bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);  
 }
-
 
 static void
 syntax(void)
@@ -70,12 +68,12 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
   
-  if (what & (BEV_EVENT_CONNECTED|BEV_EVENT_WRITING|BEV_EVENT_READING|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|BEV_EVENT_WRITING|BEV_EVENT_READING|BEV_EVENT_ERROR)) {
     
     /* version is wrong, host unreachable or just one of annoying requests */
     /* TODO:                          */
-    /*   clean up buffer more gently */
-    
+    /*   clean up buffers more gently */
+
     if (what & BEV_EVENT_ERROR) {
       if (errno)
 	perror("connection error, version is wrong or some of other causes");
@@ -84,27 +82,37 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       puts("* freed");
     }
 
+    if (what & BEV_EVENT_EOF) {
+      puts("* reached EOF");
+      
+      bufferevent_free(bev);
+      bufferevent_free(associate);
+      puts("* freed");
+    }
+
     if (what & BEV_EVENT_CONNECTED) {
       puts("* connected");
+      /* ready for next event */
+      bufferevent_setcb(bev, async_read_from_target_func, NULL, event_func, associate);
     }
     if (what & BEV_EVENT_READING) {      
       puts("* read");      
-    }    
+    }
     if (what & BEV_EVENT_WRITING) {
       if (errno)
 	perror("* connection error");
     }
-  }  
+  }
 }
 
 static void
 async_read_func(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *associate = ctx; /* we will have a talk with an associate */
-  struct evbuffer *src, *dst;
+  struct evbuffer *src;
   static struct addrspec *spec; /* this will hold spec til my associate is ready to talk */
   ev_ssize_t evsize; /* we will store buffer size here */
-  size_t buf_size, buf_size2; /* how many bytes read so far? */
+  size_t buf_size; /* how many bytes read so far? */
   unsigned char payload[12] = {5, 0, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0}; /* ready for socks payload */
   
   src = bufferevent_get_input(bev);
@@ -171,25 +179,25 @@ async_read_func(struct bufferevent *bev, void *ctx)
     memset(&target, 0, sizeof(target));
     
     target.sin_family = AF_INET;       
-    target.sin_addr.s_addr = (*spec).s_addr; //inet_addr("0.0.0.0"); // 
-    target.sin_port = (*spec).port; // htons(2000); // 
-    
-    /* do address debug */
-    char debug[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(target.sin_addr), debug, INET_ADDRSTRLEN);
-    printf("* a %s\n", debug);
-    /* do address debug */
+    target.sin_addr.s_addr = (*spec).s_addr;
+    target.sin_port = htons((*spec).port);
+
+    debug_addr(spec); /* debug address */
 
     if (bufferevent_socket_connect(associate,
 				   (struct sockaddr*)&target, sizeof(target))<0){
       perror("_write");
+      status = SDESTORY;
     }
-    
+
     /* invoke next event */
-    bufferevent_trigger_event(bev, BEV_EVENT_CONNECTED, 0);  
+    /* bufferevent_trigger_event(bev, BEV_EVENT_CONNECTED, 0);   */
+    
     if (bufferevent_write(associate, reqbuf, evsize)<0){
       perror("* _write");
+      status = SDESTORY;      
     }
+    
     puts("* sent");
     
   } else if (status == SDESTORY) {
@@ -200,7 +208,29 @@ async_read_func(struct bufferevent *bev, void *ctx)
   }
 }
 
-void
+static void
+async_read_from_target_func(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *associate = ctx;
+  struct evbuffer *src;
+  ev_ssize_t evsize; /* we will store buffer size here */
+  size_t buf_size; /* how many bytes read so far? */
+  
+  src = bufferevent_get_input(bev);
+  buf_size = evbuffer_get_length(src);
+    
+  unsigned char buffer[buf_size];
+  evsize = evbuffer_copyout(src, buffer, buf_size);
+
+  printf("* says=%ld bytes\n", evsize);
+  if (bufferevent_write(associate, buffer, evsize)<0) {
+    fprintf(stderr, "** async_read_from_target_func.bufferevent_write\n");
+    bufferevent_trigger_event(associate, BEV_EVENT_ERROR, 0);
+  }
+  // bufferevent_trigger_event(associate, BEV_EVENT_EOF, 0);
+}
+
+static void
 accept_func(struct evconnlistener *listener,
 	    evutil_socket_t fd,
 	    struct sockaddr *a, int slen, void *p)
