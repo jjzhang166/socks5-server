@@ -68,7 +68,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
   
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|BEV_EVENT_WRITING|BEV_EVENT_READING|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|BEV_EVENT_ERROR)) {
     
     /* version is wrong, host unreachable or just one of annoying requests */
     /* TODO:                          */
@@ -76,33 +76,38 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
     if (what & BEV_EVENT_ERROR) {
       if (errno)
-	perror("connection error, version is wrong or some of other causes");
+	perror("** error");
       bufferevent_free(bev);
-      bufferevent_free(associate);
+      if (associate)
+	bufferevent_free(associate);
       puts("** freed");
-    }
-
-    if (what & BEV_EVENT_EOF) {
-      puts("* reached EOF");
-      bufferevent_free(associate);      
-      bufferevent_free(bev);
-      puts("* freed");
     }
 
     if (what & BEV_EVENT_CONNECTED) {
       puts("* connected");
       /* ready for next event */
-      bufferevent_setcb(bev, async_read_from_target_func, NULL, event_func, associate);
-    }
-    if (what & BEV_EVENT_READING) {      
-      puts("* reading");      
-    }
-    if (what & BEV_EVENT_WRITING) {
-      puts("* writing");
+      bufferevent_setcb(bev,
+			async_read_from_target_func,
+			on_write_and_drain, event_func, associate);
     }
   }
 }
 
+static void
+on_write_and_drain(struct bufferevent *bev, void *ctx)
+{
+  struct evbuffer *evb = bufferevent_get_output(ctx);
+  ev_ssize_t evsize = evbuffer_get_length(evb);
+  
+  puts("* on_write_and_drain");
+  if (evsize > 0) { /* avoid leaving early */
+    // bufferevent_free(bev);
+    evbuffer_drain(evb, evsize);
+    status = SWRITE;
+  }
+}
+
+/* listens to target address and write data back to clietns */
 static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
@@ -115,8 +120,18 @@ async_write_func(struct bufferevent *bev, void *ctx)
     
   printf("* have buf=%ld\n", buf_size);  
   puts("* ready to write");
-  
+
+  /* handle leftover here */
   switch (status) {
+  case SREAD:    
+    puts("* SREAD");
+    evbuffer_drain(src, buf_size);
+    bufferevent_enable(associate, EV_READ);
+    break;
+  case SWRITE:
+    puts("* SWRITE");
+    // status = SREAD;
+    break;
   case STOP:
     puts("* stop");
     bufferevent_trigger_event(bev, BEV_EVENT_EOF, 0);
@@ -164,7 +179,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       status = SDESTORY;
     }
 
-    /* say ok to out associate */
+    /* say ok to our associate */
     if (bufferevent_write(bev, payload+2, 2)<0) {
       fprintf(stderr, "** async_read_func._write");
       status = SDESTORY;
@@ -172,39 +187,45 @@ async_read_func(struct bufferevent *bev, void *ctx)
     
     /* make sure we have a spec and then send the rest of buffer */
     if (spec) {
-      status = SWAIT;
+      // status = SWAIT;
       if (bufferevent_write(bev, payload+4, 8)<0) {
       	fprintf(stderr, "** async_read_func._write");
       	status = SDESTORY;
       }
+    } else {
+      /* TODO                                            */
+      /*   send socks failure reply in case spec is NULL */        
     }
     
-    /* wait til buffer is enough to talk to target */
+    /* wait til buffer size is enough to talk to target */
     if (evsize <= 4) {
-      status = SWAIT;      
+      
+      status = SWAIT;
+      return; /* return nad wait for next event */
+      
+    } else if (status == SREAD) {
+      
+      puts("* don't disturb I'm readling..");
+      
     } else {
+      
       status = SWRITE;
     }
 
-    switch (status) {
-    case SWAIT:
-      return;
-    case SWRITE:
-    case SREAD:
-      break;
-    }
-
   } else if (associate && status == SWRITE) {
-    printf("* Our associate is ready for work.\n");
+    
+    puts("* Our associate is ready for work");
 
     unsigned char *reqbuf;
-    reqbuf = (unsigned char*)malloc(evsize); /* pull a new buffer */
+    reqbuf = (unsigned char*)malloc(evsize);
+    
     reqbuf = header;
+    
     printf("* payload=%ld\n", evsize);
-    
+
     bufferevent_setcb(associate, NULL, NULL, event_func, bev); /* set up callbacks */
-    bufferevent_enable(associate, EV_READ|EV_WRITE);
-    
+    bufferevent_enable(associate, EV_READ);
+
     struct sockaddr_in target;
     memset(&target, 0, sizeof(target));
     
@@ -224,25 +245,34 @@ async_read_func(struct bufferevent *bev, void *ctx)
       perror("_write");
       status = SDESTORY;
     }
-
-    /* invoke next event */
-    /* bufferevent_trigger_event(bev, BEV_EVENT_CONNECTED, 0);   */
-
+    
+    /* write out date to target  */
     if (bufferevent_write(associate, reqbuf, evsize)<0){
-      perror("* _write");
-      status = SDESTORY;   
-    }
-
-    /* set status none */
-    status = STOP;
-
-  } else if (status == SDESTORY) {
-    handle_perpetrators(associate);    
+      
+      status = SDESTORY;
+      
+    } else if (status == SDESTORY) {
+      
+      handle_perpetrators(associate);    
+    }    
   } else {
-    /* handle annoying requests */
-    handle_perpetrators(bev);
+    /* this buffer must be purged */
+    puts("** this client seems wrong");
   }
 }
+
+// static void
+// watch_read(struct bufferevent *bev, void *ctx)
+// {
+//   struct evbuffer *evb = bufferevent_get_output(bev);
+//   ev_ssize_t evsize = evbuffer_get_length(evb);  
+//   
+//   puts("* watch_read");
+//   if (evsize > 0) { /* avoid leaving early */
+//     printf("* have some buffer %d\n", evsize);
+//   }
+// }
+//
 
 static void
 async_read_from_target_func(struct bufferevent *bev, void *ctx)
@@ -257,15 +287,27 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
     
   unsigned char buffer[buf_size];
   evsize = evbuffer_copyout(src, buffer, buf_size);
-
+  
   printf("* says=%ld bytes\n", evsize);
+
+  if (status == SWRITE) {
+    /* disable once and then enable it again when job done */
+    puts("* disable");
+    bufferevent_disable(bev, EV_READ);
+  }
+  
+  else if (status == SREAD) {
+    puts("*** what now");
+    // bufferevent_enable(bev, EV_READ);
+  }
+
+  status = SREAD;
+  
   if (bufferevent_write(associate, buffer, evsize)<0) {
     fprintf(stderr, "** async_read_from_target_func.bufferevent_write\n");
      /* operation aborted */
     bufferevent_trigger_event(associate, BEV_EVENT_ERROR, 0);
-  }
-  
-  // bufferevent_trigger_event(associate, BEV_EVENT_EOF, 0);
+  }    
 }
 
 static void
@@ -279,10 +321,10 @@ accept_func(struct evconnlistener *listener,
   
   /* note: dst's fd should be -1 since we do not want it to connect some address yet */
   dst = bufferevent_socket_new(base, -1, 
-			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
+			       BEV_OPT_CLOSE_ON_FREE); //|BEV_OPT_DEFER_CALLBACKS);
   
   bufferevent_setcb(src, async_read_func, async_write_func, event_func, dst);
-  bufferevent_enable(src, EV_READ|EV_WRITE);
+  bufferevent_enable(src, EV_READ);
 }
 
 int
@@ -296,7 +338,6 @@ main(int argc, char **argv)
   char opt;
   static int verbose;
   int socklen, port;  
-  // struct evconnlistener *listener;
   struct evconnlistener *listener;  
   static struct sockaddr_storage listen_on_addr;
 
