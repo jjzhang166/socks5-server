@@ -55,7 +55,8 @@ handle_addrspec(unsigned char * buffer)
     (*spec).domain = buffer + 5;
     (*spec).sin_family = 3;
     printf("* domain=%s len=%d\n", (*spec).domain, domlen);
-    break;
+    spec = NULL; /* not yet resolve domain */
+    return spec;
   default:
     fprintf(stderr, "** handle_addrspec.switch Unknown atype\n");
     return NULL;
@@ -114,19 +115,19 @@ debug_addr(struct addrspec *spec)
   switch ((*spec).sin_family) {
   case AF_INET:
     if (!((inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) == NULL)) {
-      printf("[INFO: debug_addr v4=%s:%d]\n", ip4, (*spec).port);
+      printf("* a v4=%s:%d\n", ip4, (*spec).port);
     }
     break;
   case AF_INET6:
     if (!((inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) == NULL)) {
-      printf("[INFO: debug_addr v6=%s:%d]\n", ip6, (*spec).port);
+      printf("* a v6=%s:%d\n", ip6, (*spec).port);
     }
     break;
   case 3:
-    printf("[INFO: debug_addr domain=%s:%d]\n", (*spec).domain, (*spec).port);
+    printf("* a domain=%s:%d\n", (*spec).domain, (*spec).port);
     break;
   default:
-    fprintf(stderr, "[ERROR: debug_addr Unknow family]\n");
+    fprintf(stderr, "** Unknow addr family\n");
     break;
   }
 }

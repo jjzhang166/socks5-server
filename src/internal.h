@@ -52,7 +52,7 @@ void error_exit(const char *format, ...) NORETURN;
 #define SOCKS_VERSION 5
 
  /* internal event flags */
-#define STAYSTILL 0
+#define STOP      0
 #define SREAD     1 /* reading data that a client send */
 #define SWRITE    2 /* writing data to target that a client send */
 #define SWAIT     3 /* waiting for a next event*/
