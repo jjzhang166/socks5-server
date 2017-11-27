@@ -1,7 +1,21 @@
 /* Implementation of generic handlers */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcip.h>
+#else
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
+
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
+#include <event2/util.h>
+
 #include "internal.h"
-#include "handlers.h"
+
 
 struct addrspec *
 handle_addrspec(unsigned char * buffer)
@@ -48,7 +62,7 @@ handle_addrspec(unsigned char * buffer)
   }
 
   memcpy(&pb, buffer+buflen, sizeof(pb));
-  port = pb[0]<<8|pb[1];
+  port = pb[0]<<8 | pb[1];
   (*spec).port = port;
   
   return spec;
@@ -84,7 +98,7 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
   return spec;
 }
 
-static void
+void
 debug_addr(struct addrspec *spec)
 {
   // /* ip4 and ip6 are for presentation */
