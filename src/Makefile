@@ -4,13 +4,11 @@ PROGRAM = esocks
 
 CC = cc
 
-LDLIBS =
+LOADLIBS = -levent -levent_core
 
 SRC = evsocks.c internal.c handlers.c
 
-HDR = evs.hks.h internal.h handlers.h
-
-OBJ = internal.o handlers.o evsocks.o 
+OBJ =  evsocks.o internal.o handlers.o
 
 CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -D_DEFAULT_SOURCE \
@@ -19,20 +17,13 @@ CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
 	 -W \
          -Wmissing-prototypes \
          -Wno-sign-compare \
-         -Wno-unused-parameter \
-	 -levent_core \
-	 -levent
-
-all : ${PROGRAM}
+         -Wno-unused-parameter
 
 .o :
-	${CC} -c -o $@
+	${CC} -c  ${OBJ} ${LOADLIBS} -o $@
 
 ${PROGRAM} : ${OBJ}
-	${CC} -o $@ ${OBJ} ${CFLAGS}
+	${CC} -o $@ ${OBJ} ${CFLAGS} ${LOADLIBS}
 
 clean :
 	${RM} *.o esocks
-
-showall :
-	@echo ${EXE}
