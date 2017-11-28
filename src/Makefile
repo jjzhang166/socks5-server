@@ -8,7 +8,7 @@ LOADLIBS = -levent -levent_core
 
 SRC = evsocks.c internal.c handlers.c
 
-OBJ =  evsocks.o internal.o handlers.o
+OBJ =  evsocks.o handlers.o
 
 CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -D_DEFAULT_SOURCE \
@@ -26,4 +26,4 @@ ${PROGRAM} : ${OBJ}
 	${CC} -o $@ ${OBJ} ${CFLAGS} ${LOADLIBS}
 
 clean :
-	${RM} *.o esocks
+	${RM} *.o
