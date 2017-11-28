@@ -13,17 +13,6 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 
-#ifdef __GNUC__
-
-/* This macro stops gcc -Wall complaining */
-
-#define NORETURN __attribute__ ((__noreturn__))
-#else
-#define NORETURN
-#endif
-
-void error_exit(const char *format, ...) NORETURN;
-
 /* socks version  */
 #define SOCKS_VERSION 5
 
@@ -58,6 +47,7 @@ void error_exit(const char *format, ...) NORETURN;
 #define SWAIT     3 /* waiting for a next event*/
 #define SHANG     4
 #define SDESTORY  5 /* free all pending data */
+#define SFINISHED 6 /* client left */
 
 struct addrspec {
   short sin_family;

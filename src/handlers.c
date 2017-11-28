@@ -26,7 +26,7 @@ handle_addrspec(unsigned char * buffer)
   unsigned long s_addr;
   unsigned char ip4[4];
   uint32_t ipv4;
-  unsigned char pb[2]; /* buffer for port */
+  unsigned char pb[2]; /* 2 bytes for port */
   unsigned short port;
   spec = malloc(sizeof(struct addrspec));
 
@@ -86,6 +86,7 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
     printf("%d ", buffer[i]);	
   }
   puts(" ");
+  
   if (esize <=4 )
     return NULL; /* nothing to get from this buffer */
   
