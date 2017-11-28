@@ -9,12 +9,11 @@ static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, str
 
 static void async_read_func(struct bufferevent *bev, void *ctx);
 
+/* listens to target address and writes data back to clietns */
 static void async_write_func(struct bufferevent *bev, void *ctx);
 
 static void handle_perpetrators(struct bufferevent *bev);
 
 static void async_read_from_target_func(struct bufferevent *bev, void *ctx);
 
-static void on_write_and_drain(struct bufferevent *bev, void *ctx);
-
-// static void watch_read(struct bufferevent *bev, void *ctx);
+static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);

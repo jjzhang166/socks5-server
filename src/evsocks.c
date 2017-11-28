@@ -38,12 +38,17 @@
 #include <event2/util.h>
 #include <event2/event.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include "internal.h"
 #include "evsocks.h"
 
 static struct event_base *base;
 
 static int status;
+
+static SSL_CTX *ssl_ctx = NULL;
 
 static void
 handle_perpetrators(struct bufferevent *bev)
@@ -62,22 +67,29 @@ syntax(void)
 
 static void
 event_func(struct bufferevent *bev, short what, void *ctx)
-{
-  struct bufferevent *associate = ctx;
+{  
   
   if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|BEV_EVENT_ERROR)) {
+    
+    struct bufferevent *associate = ctx;
     
     /* version is wrong, host unreachable or just one of annoying requests */
     /* TODO:                          */
     /*   clean up buffers more gently */
-
-    if (what & BEV_EVENT_ERROR) {
+    if ((what & BEV_EVENT_ERROR && status == SDESTORY) || status == STOP) {
+      printf("* status=%d\n", status);
       if (errno)
 	perror("** error");
       bufferevent_free(bev);
       if (associate)
 	bufferevent_free(associate);
       puts("* freed");
+    } else {
+      /* most likely tls/ssl connectoin  */
+      /* thus handle leftovers */
+      
+      /* do something!! */
+      status = SWRITE;      
     }
 
     if (what & BEV_EVENT_CONNECTED) {
@@ -86,6 +98,12 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       bufferevent_setcb(bev,
 			async_read_from_target_func,
 			NULL, event_func, associate);
+    }
+    if ((what & BEV_EVENT_EOF) && status != SWRITE) {
+      puts("** EOF");
+      printf("* status=%d\n", status);
+      bufferevent_free(associate);
+      bufferevent_free(bev);
     }
   }
 }
@@ -106,7 +124,7 @@ async_write_func(struct bufferevent *bev, void *ctx)
   /* handle leftover here */
   switch (status) {
   case SREAD:
-    printf("** async_write_func drains %ld\n", buf_size);
+    printf("* async_write_func drains %ld\n", buf_size);
     evbuffer_drain(src, buf_size);
     bufferevent_enable(associate, EV_READ);
     break;
@@ -114,9 +132,13 @@ async_write_func(struct bufferevent *bev, void *ctx)
     puts("* SWRITE");
     // status = SREAD;
     break;
-  case STOP:
-    puts("* stop");
-    bufferevent_trigger_event(bev, BEV_EVENT_EOF, 0);
+  case SFINISHED:
+    puts("** connection cleaning up");
+    /* bufferevent_trigger_event(bev, BEV_EVENT_EOF, 0); */
+    if (buf_size == 0) {
+      bufferevent_free(associate);
+      bufferevent_free(bev);
+    }
     break;
   }
 }
@@ -201,6 +223,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     puts("* Our associate is ready for work");
 
     unsigned char *reqbuf;
+    
     reqbuf = (unsigned char*)malloc(evsize);
     
     reqbuf = header;
@@ -231,13 +254,18 @@ async_read_func(struct bufferevent *bev, void *ctx)
 
     /* write out data to target  */
     if (bufferevent_write(associate, reqbuf, evsize)<0){      
-      status = SDESTORY;      
+      status = SDESTORY;
     } else if (status == SDESTORY) {
       
-      handle_perpetrators(associate);  
+      handle_perpetrators(associate);
+      
     }
+  } else if (status == SREAD) { /* handle leftovers  */
+    printf("* this must be tls, handle leftover %ld\n", evsize);
+    bufferevent_write(associate, header, evsize);
   } else {
     /* this buffer must be purged */
+    printf("** status=%d\n", status);
     puts("** this client seems wrong");
     handle_perpetrators(bev);
   }
@@ -275,9 +303,10 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
      
    */
   
-  puts("** set to SREAD");
+  puts("* set to SREAD");
   status = SREAD;
-  
+
+  puts("* writing to socket");  
   if (bufferevent_write(associate, buffer, evsize)<0) {
     fprintf(stderr, "** async_read_from_target_func.bufferevent_write\n");
      /* operation aborted */
@@ -296,7 +325,7 @@ accept_func(struct evconnlistener *listener,
   struct bufferevent *src, *dst;
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  
+
   /* note: dst's fd should be -1 since we do not want it to connect to target yet */
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
