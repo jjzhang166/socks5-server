@@ -37,7 +37,7 @@ static struct event_base *base;
 static int status;
 
 static void
-handle_perpetrators(struct bufferevent *bev)
+handle_perpetrators(struct bufferevent *bev, ...)
 {
   /* let's destory this buffer */
   puts("* version is so wrong");
@@ -63,7 +63,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     /* version is wrong, host unreachable or just one of annoying requests */
     /* TODO:                          */
     /*   clean up buffers more gently */
-    if ((what & BEV_EVENT_ERROR && status == SDESTORY) || status == STOP) {
+    if ((what & BEV_EVENT_ERROR && status == SDESTORY)) {
       printf("* status=%d\n", status);
       if (errno)
 	perror("** error");
@@ -76,9 +76,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     if (what & BEV_EVENT_CONNECTED) {
       puts("* connected");
       /* ready for next event */
-      bufferevent_setcb(bev,
-			async_read_from_target_func,
-			NULL, event_func, associate);
+      // status = SCONNECTED;
     }
     
     if (what & BEV_EVENT_EOF) {
@@ -88,34 +86,11 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 }
 
 static void
-async_write_func(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *associate = ctx;
-  struct evbuffer *src;
-  size_t buf_size;
-  
-  src = bufferevent_get_input(associate);
-  buf_size = evbuffer_get_length(src);
-    
-  switch (status) {
-  case SREAD:
-    printf("* async_write_func drains %ld\n", buf_size);
-    evbuffer_drain(src, buf_size);
-    bufferevent_enable(associate, EV_READ);
-    break;
-  case SWRITE:
-    printf("* async_write_func server writes=%ld\n", buf_size);
-    break;
-  }
-}
-
-static void
-async_read_func(struct bufferevent *bev, void *ctx)
+socks_init_func(struct bufferevent *bev, void *ctx)
 {
   /* we will have a talk with our associate */
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
-  static struct addrspec *spec;
   /* store copied buffer size here */
   ev_ssize_t evsize;
   /* store size from bev */
@@ -128,24 +103,58 @@ async_read_func(struct bufferevent *bev, void *ctx)
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
 
   /* socks payload */
-  unsigned char payload[12] = {5, 0, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  /* in case, failed for some reasons */
-  unsigned char failed[10];
-
+  unsigned char payload[2] = {5, 0};
   if (reqbuf[0] == SOCKS_VERSION) {
+    printf("\t\n ** initialize **\n");
+    status = SINIT;   
+  /* TODO: in case, spec is null, return an error message to a client */
+    /* say ok to our associate */
+    if (bufferevent_write(bev, payload, 2)<0) {
+      fprintf(stderr, "** async_read_func._write");
+      status = SDESTORY;
+    }
+    
+    /* drain first a few bytes  */
+    evbuffer_drain(src, evsize);
+    
+    bufferevent_setcb(bev, async_read_func, async_write_func, event_func, associate);
+    bufferevent_enable(bev, EV_READ|EV_WRITE);    
+    return;
+  }
 
-    puts("** init **");
-    /* start to parse data */
-    switch (reqbuf[1]) {
+  fprintf(stderr, "wrong protocol\n");
+  handle_perpetrators(bev);
+}
+
+static void
+async_read_func(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *associate = ctx;
+  struct evbuffer *src;  
+  static struct addrspec *spec;
+  unsigned char *buffer;
+  size_t buf_size;
+  ev_ssize_t evsize;
+  unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  
+  src = bufferevent_get_input(bev);
+  buf_size = evbuffer_get_length(src);
+  buffer = malloc(buf_size);
+  evsize = evbuffer_copyout(src, buffer, buf_size);
+ 
+  if (status == SINIT) {    
+
+    printf("* init=%ld bytes\n", evsize);
+
+    /* parse header */
+    switch (buffer[1]) {
 
     case CONNECT:
-      evbuffer_drain(src, 3); /* drain 3 bytes */
-      spec = handle_connect(bev, reqbuf, evsize);      
+      spec = handle_connect(bev, buffer, buf_size);      
       break;
 
     case BIND:
-      evbuffer_drain(src, 4); /* drain 4 bytes */
-      spec = handle_connect(bev, reqbuf, evsize);            
+      spec = handle_connect(bev, buffer, buf_size);            
       break;
       
     case UDPASSOC:
@@ -157,73 +166,98 @@ async_read_func(struct bufferevent *bev, void *ctx)
       fprintf(stderr, "** unknown command");
       status = SDESTORY;
     }
+    
+    if (!spec) {
+      puts("spec is NULL");
+      status = SDESTORY;
+    } else {
+      bufferevent_enable(bev, EV_WRITE);
+      status = SREAD;
+      /* get client be ready to write */
+      /* connect to a target and set up next event */
+      struct sockaddr_in target;
+      target.sin_family = AF_INET; /* TODO: v6 */
+      target.sin_addr.s_addr = (*spec).s_addr;
+      target.sin_port = htons((*spec).port);
 
-    /* say ok to our associate */
-    if (bufferevent_write(bev, payload+2, 2)<0) {
+      if (bufferevent_socket_connect(associate,
+				     (struct sockaddr*)&target, sizeof(target))<0){
+	payload[1] = HOST_UNREACHABLE;
+	if (bufferevent_write(bev, payload, 10)<0) {
+	  fprintf(stderr, "** failed to write");    
+	}
+      }
+      /* go to the next event? */
+      debug_addr(spec);
+      evbuffer_drain(src, buf_size);
+      printf("* drain %ld\n", buf_size);
+      return;
+    }
+  }
+  if (status == SREAD) {
+    /* make sure we already have a connection and pull the payload from a client */
+    if (bufferevent_write(associate, buffer, buf_size)<0) {
       fprintf(stderr, "** async_read_func._write");
       status = SDESTORY;
     }
-
-    /* make sure we have a spec and then can send the rest of buffer */
-    if (spec) {
-      
-      debug_addr(spec); /* debug address */
-      
-      if (bufferevent_write(bev, payload+4, 8)<0) {
-      	fprintf(stderr, "** async_read_func._write");
-      	status = SDESTORY;
-      }
-    }
-    
-    /* wait til buffer size is enough to talk to target */
-    if (evsize <= 4) {
-      status = SWAIT;
-      return; /* return and wait for next event */
-    } else {
-      status = SWRITE;
-    }
-
-  } else if (associate && status == SWRITE) {
-
-    puts("* Our associate is ready for work");    
-    printf("* payload=%ld\n", evsize);
-
-    bufferevent_setcb(associate, NULL, NULL, event_func, bev); /* set up callbacks */
-    bufferevent_enable(associate, EV_READ);
-
-    struct sockaddr_in target;
-    
-    memset(&target, 0, sizeof(target));
-    
-    target.sin_family = AF_INET;       
-    target.sin_addr.s_addr = (*spec).s_addr;
-    target.sin_port = htons((*spec).port);
-
-    if (bufferevent_socket_connect(associate,
-				   (struct sockaddr*)&target, sizeof(target))<0){
-      memcpy(failed, payload+2, 10);
-      failed[1] = HOST_UNREACHABLE;
-      if (bufferevent_write(bev, failed, 10)<0) {
-      	fprintf(stderr, "** async_read_func._write");    
-      }
-      perror("_write");
-      status = SDESTORY;
-    }
-
-    /* write out data to target  */
-    if (bufferevent_write(associate, reqbuf, evsize)<0){      
-      status = SDESTORY;
-    }
-    
-    if (status == SDESTORY) {
-      handle_perpetrators(associate);
-    }
- 
-  } else {
-    /* this buffer must be purged */
-    printf("** status=%d\n", status);
-    puts("** this client seems wrong");
+    printf("wrote %ld\n", buf_size);
+    evbuffer_drain(src, buf_size);
+    printf("* drain %ld\n", buf_size);    
+    bufferevent_setcb(associate, async_handle_read_from_target,
+		      async_handle_write_to_target, event_func, bev);
+    bufferevent_enable(associate, EV_READ|EV_WRITE);
+    return;
+  }
+  if (status == SDESTORY) {
+    printf("destory\n");
     handle_perpetrators(bev);
+  }  
+}
+
+static void
+async_handle_read_from_target(struct bufferevent *bev, void *ctx)
+{
+  puts("made a connection to a target");
+}
+
+static void
+async_handle_write_to_target(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *associate = ctx;
+  struct evbuffer *src;
+  size_t buf_size;
+  unsigned char *buffer;
+
+  puts(" should be here");
+  
+  src = bufferevent_get_input(bev);  /* first pull payload from client */
+  buf_size  = evbuffer_get_length(src);
+  buffer = malloc(buf_size);
+
+  if (status == SREAD) {
+    if (evbuffer_copyout(src, buffer, buf_size)<0) {
+      puts("failed to copyout");
+      status = SDESTORY;
+    }
+    printf("..write_to_target has read %ld and gonna write it\n", buf_size);
+    bufferevent_write(associate, buffer, buf_size);
+  }
+}
+
+
+static void
+async_write_func(struct bufferevent *bev, void *ctx)
+{
+  unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  
+  if (status == SINIT) {
+    if (bufferevent_write(bev, payload, 10)<0) {
+      fprintf(stderr, "** async_read_func._write");
+      status = SDESTORY;    
+    }
+    puts("* async_write_func: wrote");
+    /* choke client */
+    bufferevent_disable(bev, EV_WRITE);
   }
 }
 
@@ -292,8 +326,8 @@ accept_func(struct evconnlistener *listener,
   
   assert(src && dst);
   
-  bufferevent_setcb(src, async_read_func, async_write_func, event_func, dst);
-  bufferevent_enable(src, EV_READ);
+  bufferevent_setcb(src, socks_init_func, NULL, event_func, dst);
+  bufferevent_enable(src, EV_READ|EV_WRITE);
 }
 
 static void
