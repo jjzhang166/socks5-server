@@ -28,6 +28,9 @@ handle_addrspec(unsigned char * buffer)
   uint32_t ipv4;
   unsigned char pb[2]; /* 2 bytes for port */
   unsigned short port;
+
+  struct addrinfo hints, *res, *p;
+  char *dstr;
   spec = malloc(sizeof(struct addrspec));
 
   switch (atype) {
@@ -54,14 +57,31 @@ handle_addrspec(unsigned char * buffer)
     (*spec).domain = (unsigned char*)malloc(domlen);
     (*spec).domain = buffer + 5;
     (*spec).sin_family = 3;
-    printf("* domain=%s len=%d\n", (*spec).domain, domlen);
-    spec = NULL; /* not yet resolve domain */
-    return spec;
+
+    dstr = malloc(domlen);
+    sprintf(dstr, "%s", (*spec).domain);
+
+    printf("* domain=%s len=%d\n", dstr, domlen);
+    
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET; // force to use IPV4
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(dstr, NULL, &hints, &res)<0)
+      return NULL;
+    for (p = res; p != NULL; p = (*p).ai_next) {
+      puts("I am here!!");
+      if ((*p).ai_family == AF_INET) {
+	struct sockaddr_in *v4 = (struct sockaddr_in*)(*p).ai_addr;
+	(*spec).s_addr = (*v4).sin_addr.s_addr;
+	(*spec).sin_family = AF_INET;
+      }
+    }
+    break; 
   default:
     fprintf(stderr, "** handle_addrspec.switch Unknown atype\n");
     return NULL;
   }
-
+  
   memcpy(&pb, buffer+buflen, sizeof(pb));
   port = pb[0]<<8 | pb[1];
   (*spec).port = port;

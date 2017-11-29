@@ -6,8 +6,6 @@ CC = cc
 
 LOADLIBS = -levent -levent_core
 
-SRC = evsocks.c internal.c handlers.c
-
 OBJ =  evsocks.o handlers.o
 
 CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
@@ -20,7 +18,7 @@ CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -Wno-unused-parameter
 
 .o :
-	${CC} -c  ${OBJ} ${LOADLIBS} -o $@
+	${CC} -c  ${OBJ} -o $@
 
 ${PROGRAM} : ${OBJ}
 	${CC} -o $@ ${OBJ} ${CFLAGS} ${LOADLIBS}

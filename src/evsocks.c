@@ -84,9 +84,6 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     if (what & BEV_EVENT_EOF) {
       bufferevent_free(bev);
     }
-
-    if (what & BEV_EVENT_WRITING)
-      puts("* just WRITING");
   }
 }
 
@@ -100,9 +97,6 @@ async_write_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(associate);
   buf_size = evbuffer_get_length(src);
     
-  printf("* to client=%ld\n", buf_size);
-  
-  /* handle leftover here */
   switch (status) {
   case SREAD:
     printf("* async_write_func drains %ld\n", buf_size);
