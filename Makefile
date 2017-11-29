@@ -6,7 +6,7 @@ CC = cc
 
 LOADLIBS = -levent -levent_core
 
-OBJ =  evsocks.o handlers.o slog.o
+OBJ =  src/evsocks.o src/handlers.o src/slog.o
 
 CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -D_DEFAULT_SOURCE \
