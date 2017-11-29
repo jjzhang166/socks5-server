@@ -80,38 +80,14 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 			async_read_from_target_func,
 			NULL, event_func, associate);
     }
-
-    if (((what & BEV_EVENT_EOF)) && (status == SFINISHED)) {
-      puts("** EOF");
-      printf("* status=%d\n", status);
-    }
     
     if (what & BEV_EVENT_EOF) {
-      puts("* just EOF");
+      bufferevent_free(bev);
     }
 
     if (what & BEV_EVENT_WRITING)
       puts("* just WRITING");
   }
-}
-
-/* jsut for drain? for cleaning-up leftover?? */
-static void
-drain_and_free_func(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *associate = ctx;
-  struct evbuffer *src;
-  size_t buf_size;
-  
-  src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-
-  printf("* draining a packet=%ld\n", buf_size);
-  if (buf_size>0) {
-    evbuffer_drain(src, buf_size);
-  }
-  if (associate)
-    bufferevent_free(bev);
 }
 
 static void
@@ -135,14 +111,6 @@ async_write_func(struct bufferevent *bev, void *ctx)
     break;
   case SWRITE:
     printf("* async_write_func server writes=%ld\n", buf_size);
-    break;
-  case SFINISHED:
-    puts("** connection cleaning up");
-    /* bufferevent_trigger_event(bev, BEV_EVENT_EOF, 0); */
-    if (buf_size == 0) {
-      bufferevent_free(associate);
-      bufferevent_free(bev);
-    }
     break;
   }
 }
@@ -256,18 +224,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     if (status == SDESTORY) {
       handle_perpetrators(associate);
     }
-
-  } else if (status == SREAD) { /* handle leftovers  */
-
-    printf("* this must be tls, handle leftover %ld\n", evsize);    
-    printf("* status=%d\n", status);
-    
-    puts("* associate is present and I am writing data to it");
-    
-    if (bufferevent_write(associate, reqbuf, evsize)<0) {
-      fprintf(stderr, "** async_read_func._write");    
-    }
-
+ 
   } else {
     /* this buffer must be purged */
     printf("** status=%d\n", status);
@@ -309,7 +266,7 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
      make sure status is set to SREAD. 
      Otherwise, clients will leave early.
      
-   */
+  */
   
   puts("* set to SREAD");
   status = SREAD;
@@ -318,7 +275,7 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
   if (bufferevent_write(associate, buffer, evsize)<0) {
     fprintf(stderr,
 	    "** async_read_from_target_func.bufferevent_write\n");
-     /* operation aborted */
+    /* operation aborted */
     bufferevent_trigger_event(associate, BEV_EVENT_ERROR, 0);
   }    
 }
@@ -330,7 +287,7 @@ accept_func(struct evconnlistener *listener,
 {
   /* 
      Both src and dst will have a talk over an evbffer.
- */
+  */
   struct bufferevent *src, *dst;
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
@@ -359,7 +316,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
 int
 main(int argc, char **argv)
 {
-    struct options {
+  struct options {
     const char *port;
     const char *host;
   };
@@ -417,7 +374,7 @@ main(int argc, char **argv)
   }
 
   listener = evconnlistener_new_bind(base, accept_func, NULL,
-		     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
+				     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
     perror("evconnlistener_new_bind()");
