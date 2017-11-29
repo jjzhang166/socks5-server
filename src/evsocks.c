@@ -80,6 +80,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     }
     
     if (what & BEV_EVENT_EOF) {
+      puts("* reached EOF");
       bufferevent_free(bev);
     }
   }
@@ -114,7 +115,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
       status = SDESTORY;
     }
     
-    /* drain first a few bytes  */
+    /* drain first bytes  */
     evbuffer_drain(src, evsize);
     
     bufferevent_setcb(bev, async_read_func, async_write_func, event_func, associate);
@@ -204,7 +205,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     evbuffer_drain(src, buf_size);
     printf("* drain %ld\n", buf_size);    
     bufferevent_setcb(associate, async_handle_read_from_target,
-		      async_handle_write_to_target, event_func, bev);
+		      NULL, event_func, bev);
     bufferevent_enable(associate, EV_READ|EV_WRITE);
     return;
   }
@@ -217,18 +218,10 @@ async_read_func(struct bufferevent *bev, void *ctx)
 static void
 async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 {
-  puts("made a connection to a target");
-}
-
-static void
-async_handle_write_to_target(struct bufferevent *bev, void *ctx)
-{
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
   size_t buf_size;
   unsigned char *buffer;
-
-  puts(" should be here");
   
   src = bufferevent_get_input(bev);  /* first pull payload from client */
   buf_size  = evbuffer_get_length(src);
@@ -236,14 +229,31 @@ async_handle_write_to_target(struct bufferevent *bev, void *ctx)
 
   if (status == SREAD) {
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
-      puts("failed to copyout");
+      fprintf(stderr, "** failed to copyout");
       status = SDESTORY;
     }
-    printf("..write_to_target has read %ld and gonna write it\n", buf_size);
+    printf("* payload to client=%ld\n", buf_size);
     bufferevent_write(associate, buffer, buf_size);
+    evbuffer_drain(src, buf_size);    
   }
 }
 
+static void
+async_handle_write_to_target(struct bufferevent *bev, void *ctx)
+{
+  puts("async_handle_write_to_target");
+  struct evbuffer *src;
+  size_t buf_size;
+  
+  src = bufferevent_get_input(bev);  /* first pull payload from client */
+  buf_size  = evbuffer_get_length(src);
+
+  if (status == SREAD) {
+    if (buf_size>0) {
+      /* evbuffer_drain(src, buf_size); */
+    }
+  }
+}
 
 static void
 async_write_func(struct bufferevent *bev, void *ctx)
