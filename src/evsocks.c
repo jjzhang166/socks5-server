@@ -1,5 +1,5 @@
 /* 
-   Simple socks5 proxy server with Libevent 
+   Simple proxy server with Libevent 
    Author Xun   
    2017
 */
@@ -31,6 +31,7 @@
 
 #include "internal.h"
 #include "evsocks.h"
+#include "slog.h"
 
 static struct event_base *base;
 
@@ -60,27 +61,22 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     
     struct bufferevent *associate = ctx;
     
-    /* version is wrong, host unreachable or just one of annoying requests */
-    /* TODO:                          */
-    /*   clean up buffers more gently */
+    /* version is wrong, host unreachable or just one of annoying requests
+    * TODO:                         
+    *   clean up buffers more gently 
+    *
+    */
     if ((what & BEV_EVENT_ERROR && status == SDESTORY)) {
-      printf("* status=%d\n", status);
       if (errno)
-	perror("** error");
+	logger_err("event_func");
       bufferevent_free(bev);
       if (associate)
 	bufferevent_free(associate);
-      puts("* freed");
-    }
-
-    if (what & BEV_EVENT_CONNECTED) {
-      puts("* connected");
-      /* ready for next event */
-      // status = SCONNECTED;
+      logger_info("freed");
     }
     
     if (what & BEV_EVENT_EOF) {
-      puts("* reached EOF");
+      logger_debug("reached EOF");
       bufferevent_free(bev);
     }
   }
@@ -106,12 +102,14 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   /* socks payload */
   unsigned char payload[2] = {5, 0};
   if (reqbuf[0] == SOCKS_VERSION) {
-    printf("\t\n ** initialize **\n");
-    status = SINIT;   
+    
+    logger_info("getting a request");
+    
+    status = SINIT;
   /* TODO: in case, spec is null, return an error message to a client */
     /* say ok to our associate */
     if (bufferevent_write(bev, payload, 2)<0) {
-      fprintf(stderr, "** async_read_func._write");
+      logger_err("socks_init_func.bufferevent_write");
       status = SDESTORY;
     }
     
@@ -123,7 +121,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     return;
   }
 
-  fprintf(stderr, "wrong protocol\n");
+  logger_err("wrong protocol=%d", reqbuf[0]);
   handle_perpetrators(bev);
 }
 
@@ -135,17 +133,15 @@ async_read_func(struct bufferevent *bev, void *ctx)
   static struct addrspec *spec;
   unsigned char *buffer;
   size_t buf_size;
-  ev_ssize_t evsize;
   unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
   buffer = malloc(buf_size);
-  evsize = evbuffer_copyout(src, buffer, buf_size);
+  if (evbuffer_copyout(src, buffer, buf_size)<0)
+    logger_err("async_read_func.evbuffer_copyout");
  
   if (status == SINIT) {    
-
-    printf("* init=%ld bytes\n", evsize);
 
     /* parse header */
     switch (buffer[1]) {
@@ -159,17 +155,17 @@ async_read_func(struct bufferevent *bev, void *ctx)
       break;
       
     case UDPASSOC:
-      puts("* udp associate not supported");
+      logger_warn("* udp associate not supported");
       status = SDESTORY;
       break;
       
     default:
-      fprintf(stderr, "** unknown command");
+      logger_err("unknown command");
       status = SDESTORY;
     }
     
     if (!spec) {
-      puts("spec is NULL");
+      logger_warn("spec cannot be NULL");
       status = SDESTORY;
     } else {
       bufferevent_enable(bev, EV_WRITE);
@@ -180,37 +176,40 @@ async_read_func(struct bufferevent *bev, void *ctx)
       target.sin_family = AF_INET; /* TODO: v6 */
       target.sin_addr.s_addr = (*spec).s_addr;
       target.sin_port = htons((*spec).port);
-
+      
+      debug_addr(spec);
+      
       if (bufferevent_socket_connect(associate,
 				     (struct sockaddr*)&target, sizeof(target))<0){
+	logger_err("failed bufferevevnt_socket_connect");
 	payload[1] = HOST_UNREACHABLE;
 	if (bufferevent_write(bev, payload, 10)<0) {
-	  fprintf(stderr, "** failed to write");    
+	  logger_err("async_read_func.bufferevent_write");
+	  status = SDESTORY;
+	  return;
 	}
       }
-      /* go to the next event? */
-      debug_addr(spec);
       evbuffer_drain(src, buf_size);
-      printf("* drain %ld\n", buf_size);
+      logger_debug("drain=%ld", buf_size);
       return;
     }
   }
   if (status == SREAD) {
     /* make sure we already have a connection and pull the payload from a client */
     if (bufferevent_write(associate, buffer, buf_size)<0) {
-      fprintf(stderr, "** async_read_func._write");
+      logger_err("async_read_func.bufferevent_write");
       status = SDESTORY;
     }
-    printf("wrote %ld\n", buf_size);
+    logger_debug("wrote to target=%ld bytes", buf_size);
     evbuffer_drain(src, buf_size);
-    printf("* drain %ld\n", buf_size);    
+    logger_debug("drain %ld", buf_size);    
     bufferevent_setcb(associate, async_handle_read_from_target,
 		      NULL, event_func, bev);
     bufferevent_enable(associate, EV_READ|EV_WRITE);
     return;
   }
   if (status == SDESTORY) {
-    printf("destory\n");
+    logger_debug("destory");
     handle_perpetrators(bev);
   }  
 }
@@ -227,12 +226,19 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   buf_size  = evbuffer_get_length(src);
   buffer = malloc(buf_size);
 
+  if (associate == NULL) {
+    /* client left early?? */
+    logger_err("asyn_handle_read_from_target: client left");
+    status = SDESTORY;
+    return;
+  }
+
   if (status == SREAD) {
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
-      fprintf(stderr, "** failed to copyout");
+      logger_err("async_handle_read_from_target.evbuffer_copyout");
       status = SDESTORY;
-    }
-    printf("* payload to client=%ld\n", buf_size);
+    }    
+    logger_debug("payload to client=%ld", buf_size);
     bufferevent_write(associate, buffer, buf_size);
     evbuffer_drain(src, buf_size);    
   }
@@ -245,10 +251,10 @@ async_write_func(struct bufferevent *bev, void *ctx)
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
-      fprintf(stderr, "** async_read_func._write");
+      logger_err("async_read_func._write set to SDESTROY");
       status = SDESTORY;    
     }
-    puts("* async_write_func: wrote");
+    logger_debug("async_write_func: wrote");
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);
   }
@@ -283,7 +289,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   struct timeval delay = {1, 0};
   int sec = 1;
   
-  printf("*** Caught an interupt signal; exiting cleanly in %d second(s)\n", sec);
+  logger_err("*** Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   event_base_loopexit(base, &delay);
 }
 
@@ -343,27 +349,26 @@ main(int argc, char **argv)
 
   base = event_base_new();
   if (!base) {
-    perror("event_base_new()");
-    exit(EXIT_FAILURE);
+    logger_errx(1, "event_base_new()");
   }
 
   listener = evconnlistener_new_bind(base, accept_func, NULL,
 				     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
-    perror("evconnlistener_new_bind()");
+    logger_err("evconnlistener_new_bind()");
     event_base_free(base);
     exit(EXIT_FAILURE);    
   }
   
-  printf("\n* %s:%s *\n", o.host, o.port);
-  printf("* level=%d\n", verbose);
+  logger_info("Server is up and running %s:%s", o.host, o.port);
+  logger_info("level=%d", verbose);
 
   signal_event = event_new(base, SIGINT, EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
 
   if (!signal_event || event_add(signal_event, NULL)) {
-    fprintf(stderr, "** Cannot add a signal_event\n");
-    exit(EXIT_FAILURE);
+    logger_errx(1, "Cannot add a signal_event");
+    // exit(EXIT_FAILURE);
   }
 
   event_base_dispatch(base);
