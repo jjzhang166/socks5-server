@@ -2,15 +2,6 @@
    Simple socks5 proxy server with Libevent 
    Author Xun   
    2017
-
-   server replies:
-
-   +----+-----+-------+------+----------+----------+
-   |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-   +----+-----+-------+------+----------+----------+
-   | 1  |  1  | X'00' |  1   | Variable |    2     |
-   +----+-----+-------+------+----------+----------+
-
 */
 
 #if defined(__APPLE__) && defined(__clang__)
@@ -38,17 +29,12 @@
 #include <event2/util.h>
 #include <event2/event.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
 #include "internal.h"
 #include "evsocks.h"
 
 static struct event_base *base;
 
 static int status;
-
-static SSL_CTX *ssl_ctx = NULL;
 
 static void
 handle_perpetrators(struct bufferevent *bev)
@@ -61,7 +47,7 @@ handle_perpetrators(struct bufferevent *bev)
 static void
 syntax(void)
 {
-  printf("evsocks [--help] [-v verbose] [-h host] [-p port] [-u user] [-q password] [-c client mode] [-s server mode]\n");
+  printf("evsock [-h host] [-p port]\n");
   exit(EXIT_SUCCESS);
 }
 
@@ -69,7 +55,8 @@ static void
 event_func(struct bufferevent *bev, short what, void *ctx)
 {  
   
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|
+	      BEV_EVENT_READING|BEV_EVENT_READING)) {
     
     struct bufferevent *associate = ctx;
     
@@ -84,12 +71,6 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       if (associate)
 	bufferevent_free(associate);
       puts("* freed");
-    } else {
-      /* most likely tls/ssl connectoin  */
-      /* thus handle leftovers */
-      
-      /* do something!! */
-      status = SWRITE;      
     }
 
     if (what & BEV_EVENT_CONNECTED) {
@@ -99,13 +80,38 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 			async_read_from_target_func,
 			NULL, event_func, associate);
     }
-    if ((what & BEV_EVENT_EOF) && status != SWRITE) {
+
+    if (((what & BEV_EVENT_EOF)) && (status == SFINISHED)) {
       puts("** EOF");
       printf("* status=%d\n", status);
-      bufferevent_free(associate);
-      bufferevent_free(bev);
     }
+    
+    if (what & BEV_EVENT_EOF) {
+      puts("* just EOF");
+    }
+
+    if (what & BEV_EVENT_WRITING)
+      puts("* just WRITING");
   }
+}
+
+/* jsut for drain? for cleaning-up leftover?? */
+static void
+drain_and_free_func(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *associate = ctx;
+  struct evbuffer *src;
+  size_t buf_size;
+  
+  src = bufferevent_get_input(bev);
+  buf_size = evbuffer_get_length(src);
+
+  printf("* draining a packet=%ld\n", buf_size);
+  if (buf_size>0) {
+    evbuffer_drain(src, buf_size);
+  }
+  if (associate)
+    bufferevent_free(bev);
 }
 
 static void
@@ -118,9 +124,8 @@ async_write_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(associate);
   buf_size = evbuffer_get_length(src);
     
-  printf("* have buf=%ld\n", buf_size);  
-  puts("* ready to write");
-
+  printf("* to client=%ld\n", buf_size);
+  
   /* handle leftover here */
   switch (status) {
   case SREAD:
@@ -129,8 +134,7 @@ async_write_func(struct bufferevent *bev, void *ctx)
     bufferevent_enable(associate, EV_READ);
     break;
   case SWRITE:
-    puts("* SWRITE");
-    // status = SREAD;
+    printf("* async_write_func server writes=%ld\n", buf_size);
     break;
   case SFINISHED:
     puts("** connection cleaning up");
@@ -149,7 +153,6 @@ async_read_func(struct bufferevent *bev, void *ctx)
   /* we will have a talk with our associate */
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
-  /* keep spec */
   static struct addrspec *spec;
   /* store copied buffer size here */
   ev_ssize_t evsize;
@@ -158,29 +161,29 @@ async_read_func(struct bufferevent *bev, void *ctx)
 
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
-  
+    
+  unsigned char reqbuf[buf_size];
+  evsize = evbuffer_copyout(src, reqbuf, buf_size);
+
   /* socks payload */
   unsigned char payload[12] = {5, 0, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   /* in case, failed for some reasons */
   unsigned char failed[10];
-  
-  unsigned char header[buf_size];
-  evsize = evbuffer_copyout(src, header, buf_size);
 
-  if (header[0] == SOCKS_VERSION) {
-    
-    puts("* initialize service");
+  if (reqbuf[0] == SOCKS_VERSION) {
+
+    puts("** init **");
     /* start to parse data */
-    switch (header[1]) {
+    switch (reqbuf[1]) {
 
     case CONNECT:
       evbuffer_drain(src, 3); /* drain 3 bytes */
-      spec = handle_connect(bev, header, evsize);      
+      spec = handle_connect(bev, reqbuf, evsize);      
       break;
-      
+
     case BIND:
       evbuffer_drain(src, 4); /* drain 4 bytes */
-      spec = handle_connect(bev, header, evsize);            
+      spec = handle_connect(bev, reqbuf, evsize);            
       break;
       
     case UDPASSOC:
@@ -220,14 +223,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
 
   } else if (associate && status == SWRITE) {
 
-    puts("* Our associate is ready for work");
-
-    unsigned char *reqbuf;
-    
-    reqbuf = (unsigned char*)malloc(evsize);
-    
-    reqbuf = header;
-
+    puts("* Our associate is ready for work");    
     printf("* payload=%ld\n", evsize);
 
     bufferevent_setcb(associate, NULL, NULL, event_func, bev); /* set up callbacks */
@@ -255,14 +251,23 @@ async_read_func(struct bufferevent *bev, void *ctx)
     /* write out data to target  */
     if (bufferevent_write(associate, reqbuf, evsize)<0){      
       status = SDESTORY;
-    } else if (status == SDESTORY) {
-      
-      handle_perpetrators(associate);
-      
     }
+    
+    if (status == SDESTORY) {
+      handle_perpetrators(associate);
+    }
+
   } else if (status == SREAD) { /* handle leftovers  */
-    printf("* this must be tls, handle leftover %ld\n", evsize);
-    bufferevent_write(associate, header, evsize);
+
+    printf("* this must be tls, handle leftover %ld\n", evsize);    
+    printf("* status=%d\n", status);
+    
+    puts("* associate is present and I am writing data to it");
+    
+    if (bufferevent_write(associate, reqbuf, evsize)<0) {
+      fprintf(stderr, "** async_read_func._write");    
+    }
+
   } else {
     /* this buffer must be purged */
     printf("** status=%d\n", status);
@@ -285,8 +290,9 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
   unsigned char buffer[buf_size];
   evsize = evbuffer_copyout(src, buffer, buf_size);
   
-  printf("* says=%ld bytes\n", evsize);
-
+  printf("* server spoke=%ld bytes\n", evsize);
+  printf("* status=%d\n", status);
+  
   if (status == SWRITE) {
     /* disable once and then enable it again when status is SREAD */
     bufferevent_disable(bev, EV_READ);
@@ -294,6 +300,8 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
 
   else if (status == SREAD) {
     /* drain buffer from the other side */
+    /* bufferevent_enable(associate, EV_WRITE); */
+    printf("* drain called: %ld\n", buf_size);
     evbuffer_drain(src, buf_size);
   }
   
@@ -305,10 +313,11 @@ async_read_from_target_func(struct bufferevent *bev, void *ctx)
   
   puts("* set to SREAD");
   status = SREAD;
-
+  
   puts("* writing to socket");  
   if (bufferevent_write(associate, buffer, evsize)<0) {
-    fprintf(stderr, "** async_read_from_target_func.bufferevent_write\n");
+    fprintf(stderr,
+	    "** async_read_from_target_func.bufferevent_write\n");
      /* operation aborted */
     bufferevent_trigger_event(associate, BEV_EVENT_ERROR, 0);
   }    
