@@ -15,6 +15,7 @@
 #include <event2/util.h>
 
 #include "internal.h"
+#include "slog.h"
 
 
 struct addrspec *
@@ -61,7 +62,7 @@ handle_addrspec(unsigned char * buffer)
     dstr = malloc(domlen);
     sprintf(dstr, "%s", (*spec).domain);
 
-    printf("* domain=%s len=%d\n", dstr, domlen);
+    logger_debug("domain=%s len=%d", dstr, domlen);
     
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // force to use IPV4
@@ -77,7 +78,7 @@ handle_addrspec(unsigned char * buffer)
     }
     break; 
   default:
-    fprintf(stderr, "** handle_addrspec.switch Unknown atype\n");
+    logger_err("handle_addrspec.switch Unknown atype");
     return NULL;
   }
   
@@ -92,20 +93,12 @@ struct addrspec *
 handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
 {
   struct addrspec *spec = malloc(sizeof(struct addrspec));
-  
-  int i;
   size_t len;
-  
   struct evbuffer *src;
+  
   src = bufferevent_get_input(bev);
   len = evbuffer_get_length(src);
-    
-  printf("* in raw ");
-  for (i = 0; i < esize; ++i) {
-    printf("%d ", buffer[i]);	
-  }
-  puts(" ");
-  
+
   if (esize <=4 )
     return NULL; /* nothing to get from this buffer */
   
@@ -127,7 +120,6 @@ debug_addr(struct addrspec *spec)
   char ip6[INET6_ADDRSTRLEN];
   
   if (spec == NULL) {
-    fprintf(stderr, "debug_addr spec is NULL\n");
     return;
   }
   
@@ -135,19 +127,19 @@ debug_addr(struct addrspec *spec)
   switch ((*spec).sin_family) {
   case AF_INET:
     if (!((inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) == NULL)) {
-      printf("* a v4=%s:%d\n", ip4, (*spec).port);
+      logger_debug("a v4=%s:%d", ip4, (*spec).port);
     }
     break;
   case AF_INET6:
     if (!((inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) == NULL)) {
-      printf("* a v6=%s:%d\n", ip6, (*spec).port);
+      logger_debug("a v6=%s:%d", ip6, (*spec).port);
     }
     break;
   case 3:
-    printf("* a domain=%s:%d\n", (*spec).domain, (*spec).port);
+    logger_debug("a domain=%s:%d", (*spec).domain, (*spec).port);
     break;
   default:
-    fprintf(stderr, "** Unknow addr family\n");
+    logger_debug("Unknow addr family");
     break;
   }
 }
