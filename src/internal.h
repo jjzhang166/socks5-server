@@ -41,13 +41,14 @@
 #define SOCKS_VERSION 5
 
  /* internal event flags */
-#define STOP      0
-#define SREAD     1 /* reading data that a client send */
-#define SWRITE    2 /* writing data to target that a client send */
-#define SWAIT     3 /* waiting for a next event*/
-#define SHANG     4
-#define SDESTORY  5 /* free all pending data */
-#define SFINISHED 6 /* client left */
+#define SINIT      0
+#define SREAD      1 /* reading data that a client send */
+#define SWRITE     2 /* writing data to target that a client send */
+#define SWAIT      3 /* waiting for a next event*/
+#define SHANG      4
+#define SDESTORY   5 /* free all pending data */
+#define SFINISHED  6 /* client left */
+#define SCONNECTED 7
 
 struct addrspec {
   short sin_family;
@@ -56,6 +57,11 @@ struct addrspec {
   unsigned char *ipv4_addr;
   unsigned char *_s6_addr;
   unsigned short port;
+};
+
+struct conn {  
+  struct bufferevent *bev;  
+  struct addrspec *spec;
 };
 
 struct addrspec * handle_addrspec(unsigned char * buffer);

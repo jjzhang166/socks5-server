@@ -69,7 +69,6 @@ handle_addrspec(unsigned char * buffer)
     if (getaddrinfo(dstr, NULL, &hints, &res)<0)
       return NULL;
     for (p = res; p != NULL; p = (*p).ai_next) {
-      puts("I am here!!");
       if ((*p).ai_family == AF_INET) {
 	struct sockaddr_in *v4 = (struct sockaddr_in*)(*p).ai_addr;
 	(*spec).s_addr = (*v4).sin_addr.s_addr;
