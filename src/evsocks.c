@@ -34,14 +34,13 @@
 #include "slog.h"
 
 static struct event_base *base;
-
 static int status;
 
 static void
 handle_perpetrators(struct bufferevent *bev, ...)
 {
   /* let's destory this buffer */
-  puts("* version is so wrong");
+  logger_err("* version is so wrong");
   bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);  
 }
 
@@ -78,6 +77,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     if (what & BEV_EVENT_EOF) {
       logger_debug("reached EOF");
       bufferevent_free(bev);
+      bufferevent_free(associate);
     }
   }
 }
@@ -167,6 +167,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     if (!spec) {
       logger_warn("spec cannot be NULL");
       status = SDESTORY;
+      return;
     } else {
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
@@ -211,7 +212,8 @@ async_read_func(struct bufferevent *bev, void *ctx)
   if (status == SDESTORY) {
     logger_debug("destory");
     handle_perpetrators(bev);
-  }  
+    return;
+  }
 }
 
 static void
@@ -289,7 +291,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   struct timeval delay = {1, 0};
   int sec = 1;
   
-  logger_err("*** Caught an interupt signal; exiting cleanly in %d second(s)", sec);
+  logger_err("Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   event_base_loopexit(base, &delay);
 }
 

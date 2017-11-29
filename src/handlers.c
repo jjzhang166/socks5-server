@@ -54,7 +54,7 @@ handle_addrspec(unsigned char * buffer)
     break;
   case _DOMAINNAME:
     domlen = buffer[4];
-    buflen = domlen + 5;
+    buflen = domlen + 6;
     (*spec).domain = (unsigned char*)malloc(domlen);
     (*spec).domain = buffer + 5;
     (*spec).sin_family = 3;
@@ -62,13 +62,16 @@ handle_addrspec(unsigned char * buffer)
     dstr = malloc(domlen);
     sprintf(dstr, "%s", (*spec).domain);
 
-    logger_debug("domain=%s len=%d", dstr, domlen);
+    logger_debug("domain=%s; (*spec).domain=%s; len=%d;",
+		 dstr, (*spec).domain, domlen);
     
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // force to use IPV4
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(dstr, NULL, &hints, &res)<0)
+    if (getaddrinfo(dstr, NULL, &hints, &res)!=0) {
+      logger_err("getaddrinfo");
       return NULL;
+    }
     for (p = res; p != NULL; p = (*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
 	struct sockaddr_in *v4 = (struct sockaddr_in*)(*p).ai_addr;

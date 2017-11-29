@@ -108,7 +108,7 @@ socks_log(int serverity, const char *msg)
       break;
     case SOCKS_LOG_ERROR:
       serverity_str = "ERROR";
-      break;    
-    }  
+      break;
+    }
     (void)fprintf(stderr, "[%s] %s\n", serverity_str, msg);
 }
