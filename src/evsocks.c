@@ -239,23 +239,6 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 }
 
 static void
-async_handle_write_to_target(struct bufferevent *bev, void *ctx)
-{
-  puts("async_handle_write_to_target");
-  struct evbuffer *src;
-  size_t buf_size;
-  
-  src = bufferevent_get_input(bev);  /* first pull payload from client */
-  buf_size  = evbuffer_get_length(src);
-
-  if (status == SREAD) {
-    if (buf_size>0) {
-      /* evbuffer_drain(src, buf_size); */
-    }
-  }
-}
-
-static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
   unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
@@ -269,53 +252,6 @@ async_write_func(struct bufferevent *bev, void *ctx)
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);
   }
-}
-
-static void
-async_read_from_target_func(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *associate = ctx;
-  struct evbuffer *src;
-  ev_ssize_t evsize; /* we will store buffer size here */
-  size_t buf_size; /* how many bytes read so far? */
-
-  src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-    
-  unsigned char buffer[buf_size];
-  evsize = evbuffer_copyout(src, buffer, buf_size);
-  
-  printf("* server spoke=%ld bytes\n", evsize);
-  printf("* status=%d\n", status);
-  
-  if (status == SWRITE) {
-    /* disable once and then enable it again when status is SREAD */
-    bufferevent_disable(bev, EV_READ);
-  }
-
-  else if (status == SREAD) {
-    /* drain buffer from the other side */
-    /* bufferevent_enable(associate, EV_WRITE); */
-    printf("* drain called: %ld\n", buf_size);
-    evbuffer_drain(src, buf_size);
-  }
-  
-  /* 
-     make sure status is set to SREAD. 
-     Otherwise, clients will leave early.
-     
-  */
-  
-  puts("* set to SREAD");
-  status = SREAD;
-  
-  puts("* writing to socket");  
-  if (bufferevent_write(associate, buffer, evsize)<0) {
-    fprintf(stderr,
-	    "** async_read_from_target_func.bufferevent_write\n");
-    /* operation aborted */
-    bufferevent_trigger_event(associate, BEV_EVENT_ERROR, 0);
-  }    
 }
 
 static void
