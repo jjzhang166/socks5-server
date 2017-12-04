@@ -24,4 +24,4 @@ ${PROGRAM} : ${OBJ}
 	${CC} ${OBJ} ${CFLAGS} ${LOADLIBS}  -o $@
 
 clean :
-	${RM} *.o
+	${RM} src/*.o
