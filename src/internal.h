@@ -1,4 +1,10 @@
-/* copyright (C) Xun, 2017 */
+/* 
+ * internal.h
+ * Copyright (c) 2017 Xun
+ *
+ *
+*/
+
 
 #ifndef INTERNAL_H
 #define INTERNAL_H
@@ -55,7 +61,7 @@ struct addrspec {
   unsigned char *domain;
   unsigned long s_addr;
   unsigned char *ipv4_addr;
-  unsigned char *_s6_addr;
+  unsigned char _s6_addr[16];
   unsigned short port;
 };
 

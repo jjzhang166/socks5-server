@@ -1,9 +1,5 @@
-/* logger for socks5 server
- *  
- *
- * Author Xun <lu.xun@gmx.com>
- *
- *
+/* 
+ * slog.h
 */
 
 #include <stdarg.h>

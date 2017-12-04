@@ -1,7 +1,8 @@
 /* 
-   Simple proxy server with Libevent 
-   Author Xun   
-   2017
+ * Simple proxy server with Libevent 
+ * 
+ * Copyright (c) 2017 Xun
+ *
 */
 
 #if defined(__APPLE__) && defined(__clang__)
@@ -172,7 +173,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       logger_err("unknown command");
       status = SDESTORY;
     }
-    
+
     if (!spec) {
       logger_warn("spec cannot be NULL");
       status = SDESTORY;

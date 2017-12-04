@@ -1,4 +1,9 @@
-/* Implementation of generic handlers */
+/* 
+ * handler.c
+ * Copyright (c) 2017 Xun
+ *
+ * Implementation of generic socks handlers 
+*/
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -17,7 +22,6 @@
 #include "internal.h"
 #include "slog.h"
 
-
 struct addrspec *
 handle_addrspec(unsigned char * buffer)
 {
@@ -27,11 +31,13 @@ handle_addrspec(unsigned char * buffer)
   unsigned long s_addr;
   unsigned char ip4[4];
   uint32_t ipv4;
+  char ipv6[INET6_ADDRSTRLEN];
   unsigned char pb[2]; /* 2 bytes for port */
   unsigned short port;
 
-  struct addrinfo hints, *res, *p;
+  struct addrinfo hints, *res, *p; /* for getaddrinfo */
   char *dstr;
+
   spec = malloc(sizeof(struct addrspec));
 
   switch (atype) {
@@ -47,10 +53,22 @@ handle_addrspec(unsigned char * buffer)
     (*spec).sin_family = AF_INET;
     break;
   case IPV6:
-    buflen = 20;
-    (*spec)._s6_addr = (unsigned char*)malloc(16);
-    (*spec)._s6_addr = buffer + 4; /* jump to 16 bytes address */
+    buflen = 20;    
     (*spec).sin_family = AF_INET6;
+    memcpy((*spec)._s6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+
+    if (!(inet_ntop(AF_INET6, &((*spec)._s6_addr), ipv6, INET6_ADDRSTRLEN))) {
+      logger_err("inet_ntop(AF_INET6..");
+      return NULL;
+    }
+
+    if (inet_pton(AF_INET6, ipv6, (*spec)._s6_addr)<0) {
+      logger_err("inet_pton(AF_INET6..");      
+      return NULL;
+    }
+    
+    logger_debug("v6 %s", ipv6);
+    
     break;
   case _DOMAINNAME:
     domlen = buffer[4];
@@ -63,7 +81,7 @@ handle_addrspec(unsigned char * buffer)
     sprintf(dstr, "%s", (*spec).domain);
     
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; // force to use IPV4
+    hints.ai_family = AF_INET; /* force to use IPV4 */
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(dstr, NULL, &hints, &res)!=0) {
       logger_err("getaddrinfo");
@@ -71,17 +89,17 @@ handle_addrspec(unsigned char * buffer)
     }
     for (p = res; p != NULL; p = (*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
-	struct sockaddr_in *v4 = (struct sockaddr_in*)(*p).ai_addr;
+	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
 	(*spec).s_addr = (*v4).sin_addr.s_addr;
 	(*spec).sin_family = AF_INET;
       }
     }
-    break; 
+    break;
   default:
     logger_err("handle_addrspec.switch Unknown atype");
     return NULL;
   }
-  
+
   memcpy(&pb, buffer+buflen, sizeof(pb));
   port = pb[0]<<8 | pb[1];
   (*spec).port = port;
@@ -105,14 +123,18 @@ handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
     return NULL; /* nothing to get from this buffer */
   
   spec = handle_addrspec(buffer);
-  if ((spec == NULL)) {
-    return NULL;
-  }
+
   /* drain a read buffer */
   evbuffer_drain(src, len);
 
   return spec;
 }
+
+/* void 
+ * handle_udp_associate()
+ *  { 
+} 
+*/
 
 void
 debug_addr(struct addrspec *spec)
