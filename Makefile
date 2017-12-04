@@ -2,8 +2,6 @@
 
 PROGRAM = esocks
 
-CC = cc
-
 LOADLIBS = -levent -levent_core
 
 OBJ =  src/evsocks.o src/handlers.o src/slog.o
@@ -18,10 +16,10 @@ CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
          -Wno-unused-parameter
 
 .o :
-	${CC} -c  ${OBJ} -o $@
+	$(CC) -c  $(OBJ) -o $@
 
-${PROGRAM} : ${OBJ}
-	${CC} ${OBJ} ${CFLAGS} ${LOADLIBS}  -o $@
+$(PROGRAM) : $(OBJ)
+	$(CC) $(OBJ) $(CFLAGS) $(LOADLIBS)  -o $@
 
 clean :
-	${RM} src/*.o
+	$(RM) src/*.o
