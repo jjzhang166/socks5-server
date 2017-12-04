@@ -55,7 +55,7 @@ struct addrspec {
   unsigned char *domain;
   unsigned long s_addr;
   unsigned char *ipv4_addr;
-  unsigned char *_s6_addr;
+  unsigned char _s6_addr[16];
   unsigned short port;
 };
 
