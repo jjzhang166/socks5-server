@@ -37,10 +37,11 @@ static struct event_base *base;
 static int status;
 
 static void
-handle_perpetrators(struct bufferevent *bev, ...)
+handle_perpetrators(struct bufferevent *bev)
 {
   /* let's destory this buffer */
-  logger_err("* version is so wrong");
+  logger_err("version is so wrong");
+  logger_info("status=%d", status);
   bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);  
 }
 
@@ -54,27 +55,24 @@ syntax(void)
 static void
 event_func(struct bufferevent *bev, short what, void *ctx)
 {  
-  
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_CONNECTED|
-	      BEV_EVENT_READING|BEV_EVENT_READING)) {
-    
-    struct bufferevent *associate = ctx;
+
+  struct bufferevent *associate = ctx;
+      
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {   
     
     /* version is wrong, host unreachable or just one of annoying requests
-    * TODO:                         
-    *   clean up buffers more gently 
-    *
-    */
+    * TODO:
+    *   clean up buffers more gently */
     if ((what & BEV_EVENT_ERROR && status == SDESTORY)) {
       if (errno)
 	logger_err("event_func");
       bufferevent_free(bev);
-      if (associate)
-	bufferevent_free(associate);
-      logger_info("freed");
+    if (associate)
+      bufferevent_free(associate);
+    logger_info("freed");
     }
-    
-    if (what & BEV_EVENT_EOF) {
+
+  if (what & BEV_EVENT_EOF) {
       logger_debug("reached EOF");
       bufferevent_free(bev);
       bufferevent_free(associate);
@@ -106,22 +104,32 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     logger_info("getting a request");
     
     status = SINIT;
-  /* TODO: in case, spec is null, return an error message to a client */
-    /* say ok to our associate */
+    
+  /* 
+   * TODO: in case, spec is null, return a 
+   * proper error message to a client
+   * say ok to our associate */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTORY;
+      return;
     }
-    
+
     /* drain first bytes  */
     evbuffer_drain(src, evsize);
     
-    bufferevent_setcb(bev, async_read_func, async_write_func, event_func, associate);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);    
+    bufferevent_setcb(bev, async_read_func,
+		      async_write_func, event_func, associate);
+    
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    
     return;
   }
 
+  status = SDESTORY;
+  
   logger_err("wrong protocol=%d", reqbuf[0]);
+  
   handle_perpetrators(bev);
 }
 
@@ -138,6 +146,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
   buffer = malloc(buf_size);
+  
   if (evbuffer_copyout(src, buffer, buf_size)<0)
     logger_err("async_read_func.evbuffer_copyout");
  
@@ -168,6 +177,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       logger_warn("spec cannot be NULL");
       status = SDESTORY;
       return;
+      
     } else {
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
@@ -178,12 +188,13 @@ async_read_func(struct bufferevent *bev, void *ctx)
       target.sin_addr.s_addr = (*spec).s_addr;
       target.sin_port = htons((*spec).port);
       
-      debug_addr(spec);
-      
       if (bufferevent_socket_connect(associate,
-				     (struct sockaddr*)&target, sizeof(target))<0){
+	     (struct sockaddr*)&target, sizeof(target))<0){
+	
 	logger_err("failed bufferevevnt_socket_connect");
+	
 	payload[1] = HOST_UNREACHABLE;
+	
 	if (bufferevent_write(bev, payload, 10)<0) {
 	  logger_err("async_read_func.bufferevent_write");
 	  status = SDESTORY;
@@ -203,15 +214,18 @@ async_read_func(struct bufferevent *bev, void *ctx)
     }
     logger_debug("wrote to target=%ld bytes", buf_size);
     evbuffer_drain(src, buf_size);
-    logger_debug("drain %ld", buf_size);    
+    logger_debug("drain=%ld", buf_size);    
     bufferevent_setcb(associate, async_handle_read_from_target,
 		      NULL, event_func, bev);
     bufferevent_enable(associate, EV_READ|EV_WRITE);
     return;
   }
+  
   if (status == SDESTORY) {
+
     logger_debug("destory");
     handle_perpetrators(bev);
+    
     return;
   }
 }
@@ -239,7 +253,8 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
       logger_err("async_handle_read_from_target.evbuffer_copyout");
       status = SDESTORY;
-    }    
+    }
+    
     logger_debug("payload to client=%ld", buf_size);
     bufferevent_write(associate, buffer, buf_size);
     evbuffer_drain(src, buf_size);    
@@ -256,9 +271,12 @@ async_write_func(struct bufferevent *bev, void *ctx)
       logger_err("async_read_func._write set to SDESTROY");
       status = SDESTORY;    
     }
+    
     logger_debug("async_write_func: wrote");
+    
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);
+    
   }
 }
 
