@@ -56,10 +56,17 @@ handle_addrspec(unsigned char * buffer)
     buflen = 20;    
     (*spec).sin_family = AF_INET6;
     memcpy((*spec)._s6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+
     if (!(inet_ntop(AF_INET6, &((*spec)._s6_addr), ipv6, INET6_ADDRSTRLEN))) {
       logger_err("inet_ntop(AF_INET6..");
+      return NULL;
     }
 
+    if (inet_pton(AF_INET6, ipv6, (*spec)._s6_addr)<0) {
+      logger_err("inet_pton(AF_INET6..");      
+      return NULL;
+    }
+    
     logger_debug("v6 %s", ipv6);
     
     break;
