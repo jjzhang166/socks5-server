@@ -1,3 +1,10 @@
+/* 
+ * evsocks.h
+ * Copyright (c) 2017 Xun
+ *
+ * 
+*/
+
 #include <event2/bufferevent.h>
 #include <event2/util.h>
 

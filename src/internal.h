@@ -1,4 +1,10 @@
-/* copyright (C) Xun, 2017 */
+/* 
+ * internal.h
+ * Copyright (c) 2017 Xun
+ *
+ *
+*/
+
 
 #ifndef INTERNAL_H
 #define INTERNAL_H
