@@ -23,17 +23,17 @@
 #include "slog.h"
 
 struct addrspec *
-handle_addrspec(unsigned char * buffer)
+handle_addrspec(ev_uint8_t * buffer)
 {
   struct addrspec *spec;
-  unsigned char atype = buffer[3];
+  ev_uint8_t atype = buffer[3];
   int buflen, domlen;  
   unsigned long s_addr;
-  unsigned char ip4[4];
+  ev_uint8_t ip4[4];
   uint32_t ipv4;
   char ipv6[INET6_ADDRSTRLEN];
-  unsigned char pb[2]; /* 2 bytes for port */
-  unsigned short port;
+  ev_uint8_t pb[2]; /* 2 bytes for port */
+  ev_uint16_t port;
 
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
   char *dstr;
@@ -73,7 +73,7 @@ handle_addrspec(unsigned char * buffer)
   case _DOMAINNAME:
     domlen = buffer[4];
     buflen = domlen + 5;
-    (*spec).domain = (unsigned char*)malloc(domlen);
+    (*spec).domain = (ev_uint8_t*)malloc(domlen);
     (*spec).domain = buffer + 5;
     (*spec).sin_family = 3;
 
@@ -110,7 +110,7 @@ handle_addrspec(unsigned char * buffer)
 }
 
 struct addrspec *
-handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t esize)
+handle_connect(struct bufferevent *bev, ev_uint8_t *buffer, ev_ssize_t esize)
 {
   struct addrspec *spec = malloc(sizeof(struct addrspec));
   size_t len;

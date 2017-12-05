@@ -58,11 +58,11 @@
 
 struct addrspec {
   short sin_family;
-  unsigned char *domain;
-  unsigned long s_addr;
-  unsigned char *ipv4_addr;
-  unsigned char _s6_addr[16];
-  unsigned short port;
+  ev_uint8_t *domain;
+  ev_uint64_t s_addr;
+  ev_uint8_t *ipv4_addr;
+  ev_uint8_t _s6_addr[16];
+  ev_uint16_t port;
 };
 
 struct conn {  
@@ -70,8 +70,8 @@ struct conn {
   struct addrspec *spec;
 };
 
-struct addrspec * handle_addrspec(unsigned char * buffer);
-struct addrspec * handle_connect(struct bufferevent *bev, unsigned char *buffer, ev_ssize_t evsize);
+struct addrspec * handle_addrspec(ev_uint8_t * buffer);
+struct addrspec * handle_connect(struct bufferevent *bev, ev_uint8_t *buffer, ev_ssize_t evsize);
 
 extern void debug_addr(struct addrspec *spec);
 
