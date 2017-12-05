@@ -79,9 +79,6 @@ handle_addrspec(ev_uint8_t * buffer)
     dstr = malloc(domlen);
     sprintf(dstr, "%s", (*spec).domain);
 
-    for (int i =0; i < domlen;i++)
-      printf("%c \n", dstr[i]);
-    puts(" ");
     logger_info("domain=%s", dstr);
     
     memset(&hints, 0, sizeof(hints));
@@ -93,8 +90,6 @@ handle_addrspec(ev_uint8_t * buffer)
       return NULL;
     }
 
-    puts("***** I'm hee???");
-    
     for (p = res; p != NULL; p = (*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
 	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
