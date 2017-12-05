@@ -34,6 +34,7 @@
 #include "evsocks.h"
 #include "slog.h"
 
+
 static void
 handle_perpetrators(struct bufferevent *bev)
 {
@@ -49,13 +50,13 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
       
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {   
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR|BEV_EVENT_CONNECTED)) {
     
     /* version is wrong, host unreachable or just one of annoying requests
     * TODO:
     *   clean up buffers more gently 
     *   find out what causes errors */
-    if ((what & BEV_EVENT_ERROR && status == SDESTORY)) {
+    if ((what & BEV_EVENT_ERROR && status == SDESTROY)) {
       if (errno)
 	logger_err("event_func");
       bufferevent_free(bev);
@@ -65,7 +66,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     }
 
     if (what & BEV_EVENT_ERROR)
-      logger_err("event_func with no SDESTORY flag");
+      logger_err("event_func with no SDESTROY flag");
 
   if (what & BEV_EVENT_EOF) {
     logger_debug(verbose, "reached EOF");
@@ -106,8 +107,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
    * say ok to our associate */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
-      status = SDESTORY;
-      return;
+      status = SDESTROY;
     }
 
     /* drain first bytes  */
@@ -120,7 +120,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     return;
   }
 
-  status = SDESTORY;
+  status = SDESTROY;
   logger_err("wrong protocol=%d", reqbuf[0]);
   handle_perpetrators(bev);
 }
@@ -158,18 +158,18 @@ async_read_func(struct bufferevent *bev, void *ctx)
     case UDPASSOC:
       logger_warn("udp associate is not supported");
       payload[1] = NOT_SUPPORTED;
-      status = SDESTORY;
+      status = SDESTROY;
       break;
 
     default:
       logger_err("unknown command");
-      status = SDESTORY;
+      status = SDESTROY;
     }
 
     if (!spec) {
+      
       logger_warn("spec cannot be NULL");
-      status = SDESTORY;
-      return;
+      status = SDESTROY;
       
     } else {
       bufferevent_enable(bev, EV_WRITE);
@@ -190,8 +190,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	
 	if (bufferevent_write(bev, payload, 10)<0) {
 	  logger_err("async_read_func.bufferevent_write");
-	  status = SDESTORY;
-	  return;
+	  status = SDESTROY;
 	}
       }
       evbuffer_drain(src, buf_size);
@@ -199,11 +198,12 @@ async_read_func(struct bufferevent *bev, void *ctx)
       return;
     }
   }
+  
   if (status == SREAD) {
     /* make sure we already have a connection and pull the payload from a client */
     if (bufferevent_write(associate, buffer, buf_size)<0) {
       logger_err("async_read_func.bufferevent_write");
-      status = SDESTORY;
+      status = SDESTROY;
     }
     logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
     evbuffer_drain(src, buf_size);
@@ -214,13 +214,11 @@ async_read_func(struct bufferevent *bev, void *ctx)
     return;
   }
   
-  if (status == SDESTORY) {
-
+  if (status == SDESTROY) {
     logger_info("destory");
-    handle_perpetrators(bev);
-    
+    handle_perpetrators(bev);    
     return;
-  }
+  }  
 }
 
 static void
@@ -238,14 +236,13 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   if (associate == NULL) {
     /* client left early?? */
     logger_err("asyn_handle_read_from_target: client left");
-    status = SDESTORY;
-    return;
+    status = SDESTROY;
   }
 
   if (status == SREAD) {
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
       logger_err("async_handle_read_from_target.evbuffer_copyout");
-      status = SDESTORY;
+      status = SDESTROY;
     }
 
     logger_debug(verbose, "payload to client=%ld", buf_size);
@@ -262,7 +259,7 @@ async_write_func(struct bufferevent *bev, void *ctx)
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
       logger_err("async_read_func._write set to SDESTROY");
-      status = SDESTORY;    
+      status = SDESTROY;    
     }
     
     logger_debug(verbose, "async_write_func: wrote");

@@ -71,6 +71,11 @@ handle_addrspec(ev_uint8_t * buffer)
     
     break;
   case _DOMAINNAME:
+  /* TODO: 
+   *   lookups faile when Chrome is here
+   *   
+   * Chrome is soooo wrong. Whyyyyyyyyyyy
+  */
     domlen = buffer[4];
     buflen = domlen + 5;
     (*spec).domain = (ev_uint8_t*)malloc(domlen);
@@ -158,12 +163,12 @@ debug_addr(struct addrspec *spec)
   /* going to present address */
   switch ((*spec).sin_family) {
   case AF_INET:
-    if (!((evutil_inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) == NULL)) {
+    if (!(evutil_inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN))) {
       logger_info("to v4=%s:%d", ip4, (*spec).port);
     }
     break;
   case AF_INET6:
-    if (!((evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) == NULL)) {
+    if (!((evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)))) {
       logger_debug(verbose, "to v6=%s:%d", ip6, (*spec).port);
     }
     break;

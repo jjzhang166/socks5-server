@@ -52,7 +52,7 @@
 #define SWRITE     2 /* writing data to target that a client send */
 #define SWAIT      3 /* waiting for a next event*/
 #define SHANG      4
-#define SDESTORY   5 /* free all pending data */
+#define SDESTROY   5 /* free all pending data */
 #define SFINISHED  6 /* client left */
 #define SCONNECTED 7
 
