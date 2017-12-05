@@ -8,6 +8,12 @@
 #include <event2/bufferevent.h>
 #include <event2/util.h>
 
+
+static struct event_base *base;
+
+/* status holds current eventbuffer's status */
+static int status;
+
 static void syntax(void);
 
 static void event_func(struct bufferevent *bev, short what, void *ctx);
