@@ -47,13 +47,15 @@ logger_warn(const char *fmt, ...)
 }
 
 void
-logger_debug(const char *fmt, ...)
+logger_debug(int v, const char *fmt, ...)
 {
   va_list ap;
 
-  va_start(ap, fmt);
-  log_output(SOCKS_LOG_DEBUG, NULL, fmt, ap);
-  va_end(ap);  
+  if (v>0) {
+    va_start(ap, fmt);
+    log_output(SOCKS_LOG_DEBUG, NULL, fmt, ap);
+    va_end(ap);
+  }
 }
 
 

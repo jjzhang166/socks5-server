@@ -75,4 +75,7 @@ struct addrspec * handle_connect(struct bufferevent *bev, ev_uint8_t *buffer, ev
 
 extern void debug_addr(struct addrspec *spec);
 
+/* verbose for verbose log output */
+static int verbose;
+
 #endif
