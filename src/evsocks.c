@@ -156,7 +156,8 @@ async_read_func(struct bufferevent *bev, void *ctx)
       break;
       
     case UDPASSOC:
-      logger_warn("* udp associate not supported");
+      logger_warn("udp associate is not supported");
+      payload[1] = NOT_SUPPORTED;
       status = SDESTORY;
       break;
 
@@ -173,8 +174,8 @@ async_read_func(struct bufferevent *bev, void *ctx)
     } else {
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
-      /* get client be ready to write */
-      /* connect to a target and set up next event */
+      /* get this client ready to write */
+      /* connects to a target and sets up next events */
       struct sockaddr_in target;
       target.sin_family = AF_INET; /* TODO: v6 */
       target.sin_addr.s_addr = (*spec).s_addr;
@@ -183,7 +184,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       if (bufferevent_socket_connect(associate,
 	     (struct sockaddr*)&target, sizeof(target))<0){
 	
-	logger_err("failed bufferevevnt_socket_connect");
+	logger_err("is failed bufferevevnt_socket_connect");
 	
 	payload[1] = HOST_UNREACHABLE;
 	
@@ -194,7 +195,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	}
       }
       evbuffer_drain(src, buf_size);
-      logger_debug(verbose, "drain=%ld", buf_size);
+      logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
       return;
     }
   }
@@ -342,6 +343,7 @@ main(int argc, char **argv)
   }
 
   if (!o.host) {
+    /* htonl(0x7f000001) == 127.0.0.1 */
     o.host = "0.0.0.0";
   }
   if (!o.port) {
@@ -358,7 +360,7 @@ main(int argc, char **argv)
     if (port < 1 || port > 65535)
       syntax();
     (*sin).sin_port = htons(port);
-    if (inet_pton(AF_INET, o.host, &((*sin).sin_addr))<0)
+    if (evutil_inet_pton(AF_INET, o.host, &((*sin).sin_addr))<0)
       syntax();
     (*sin).sin_family = AF_INET;
     socklen = sizeof(struct sockaddr_in);
