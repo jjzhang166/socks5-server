@@ -38,7 +38,7 @@
 static void
 handle_perpetrators(struct bufferevent *bev)
 {
-  /* let's destory this buffer */
+  /* let's destroy this buffer */
   logger_err("version is so wrong");
   logger_info("status=%d", status);
   bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);  
@@ -215,7 +215,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
   }
   
   if (status == SDESTROY) {
-    logger_info("destory");
+    logger_info("destroy");
     handle_perpetrators(bev);    
     return;
   }  
