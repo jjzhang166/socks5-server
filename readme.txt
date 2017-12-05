@@ -1,5 +1,13 @@
 * socks5 proxy server
- Work in progress. The server is not functional yet.
+ FEATURE(s):
+  * handling https/http connections with polling api
+
+ TODO:
+  * basic proxy authentication
+  * tcp fast open
+  * udp associate command
+  * udp relay
+
  
-* dependency:
+* DEPENDENCY:
   * Libevent(http://libevent.org)
