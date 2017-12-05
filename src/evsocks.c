@@ -95,11 +95,11 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
     
-  unsigned char reqbuf[buf_size];
+  ev_uint8_t reqbuf[buf_size];
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
 
   /* socks payload */
-  unsigned char payload[2] = {5, 0};
+  ev_uint8_t payload[2] = {5, 0};
   if (reqbuf[0] == SOCKS_VERSION) {
     
     logger_info("getting a request");
@@ -140,9 +140,9 @@ async_read_func(struct bufferevent *bev, void *ctx)
   struct bufferevent *associate = ctx;
   struct evbuffer *src;  
   static struct addrspec *spec;
-  unsigned char *buffer;
+  ev_uint8_t *buffer;
   size_t buf_size;
-  unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
@@ -237,7 +237,7 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
   size_t buf_size;
-  unsigned char *buffer;
+  ev_uint8_t *buffer;
   
   src = bufferevent_get_input(bev);  /* first pull payload from client */
   buf_size  = evbuffer_get_length(src);
@@ -265,7 +265,7 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
-  unsigned char payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
