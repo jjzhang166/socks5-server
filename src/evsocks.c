@@ -137,7 +137,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
   
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
-  buffer = malloc(buf_size);
+  buffer = malloc(sizeof(ev_int8_t*)*buf_size);
   
   if (evbuffer_copyout(src, buffer, buf_size)<0)
     logger_err("async_read_func.evbuffer_copyout");
@@ -180,7 +180,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       target.sin_family = AF_INET; /* TODO: v6 */
       target.sin_addr.s_addr = (*spec).s_addr;
       target.sin_port = htons((*spec).port);
-      
+
       if (bufferevent_socket_connect(associate,
 	     (struct sockaddr*)&target, sizeof(target))<0){
 	
@@ -231,7 +231,7 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */
   buf_size  = evbuffer_get_length(src);
-  buffer = malloc(buf_size);
+  buffer = malloc(sizeof(ev_uint8_t*)*buf_size);
 
   if (associate == NULL) {
     /* client left early?? */
