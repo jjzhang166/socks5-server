@@ -34,7 +34,7 @@ handle_addrspec(ev_uint8_t * buffer)
   char ipv6[INET6_ADDRSTRLEN];
   ev_uint8_t pb[2]; /* 2 bytes for port */
   ev_uint16_t port;
-  struct addrinfo hints, *res, *p; /* for getaddrinfo */
+  struct addrinfo hints, *res; /* for getaddrinfo */
 
   spec = malloc(sizeof(struct addrspec));
 
