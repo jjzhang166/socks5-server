@@ -57,7 +57,7 @@
 #define SCONNECTED 7
 
 struct addrspec {
-  short sin_family;
+  short family;
   ev_uint8_t *domain;
   ev_uint64_t s_addr;
   ev_uint8_t *ipv4_addr;
