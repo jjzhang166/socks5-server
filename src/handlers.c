@@ -34,9 +34,7 @@ handle_addrspec(ev_uint8_t * buffer)
   char ipv6[INET6_ADDRSTRLEN];
   ev_uint8_t pb[2]; /* 2 bytes for port */
   ev_uint16_t port;
-
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
-  char *dstr;
 
   spec = malloc(sizeof(struct addrspec));
 
@@ -50,11 +48,11 @@ handle_addrspec(ev_uint8_t * buffer)
              (uint32_t)ip4[3];
     s_addr = htonl(ipv4);
     (*spec).s_addr = s_addr;
-    (*spec).sin_family = AF_INET;
+    (*spec).family = AF_INET;
     break;
   case IPV6:
     buflen = 20;    
-    (*spec).sin_family = AF_INET6;
+    (*spec).family = AF_INET6;
     memcpy((*spec)._s6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
 
     if (!(evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ipv6, INET6_ADDRSTRLEN))) {
@@ -77,33 +75,24 @@ handle_addrspec(ev_uint8_t * buffer)
    * Chrome is soooo wrong. Whyyyyyyyyyyy
   */
     domlen = buffer[4];
-    buflen = domlen + 5;
-    (*spec).domain = (ev_uint8_t*)malloc(domlen);
-    (*spec).domain = buffer + 5;
-    (*spec).sin_family = 3;
-    dstr = malloc(domlen);
-    sprintf(dstr, "%s", (*spec).domain);
+    buflen = domlen+5;
 
-    logger_info("domain=%s", dstr);
+    (*spec).domain = (ev_uint8_t*)calloc(domlen, sizeof(ev_uint8_t));
+
+    memcpy((*spec).domain, buffer+5, domlen);    
+    
+    (*spec).family = 3;
     
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; /* force to use IPV4 */
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-
-    if (getaddrinfo(dstr, NULL, &hints, &res)!=0) {
-      logger_err("getaddrinfo=%s", dstr);
+    
+    if (getaddrinfo((*spec).domain, NULL, &hints, &res)<0) {
+      perror("getaddrinfo");
       return NULL;
+    } else {
+      puts("ok");
     }
-
-    for (p = res; p != NULL; p = (*p).ai_next) {
-      if ((*p).ai_family == AF_INET) {
-	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
-	(*spec).s_addr = (*v4).sin_addr.s_addr;
-	(*spec).sin_family = AF_INET;
-      }
-    }
-   
-    debug_addr(spec);
     
     freeaddrinfo(res);
     logger_debug(verbose, "freed addrinfo");
@@ -161,14 +150,14 @@ debug_addr(struct addrspec *spec)
   }
   
   /* going to present address */
-  switch ((*spec).sin_family) {
+  switch ((*spec).family) {
   case AF_INET:
-    if (!(evutil_inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN))) {
+    if (evutil_inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) {
       logger_info("to v4=%s:%d", ip4, (*spec).port);
     }
     break;
   case AF_INET6:
-    if (!((evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)))) {
+    if (evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) {
       logger_debug(verbose, "to v6=%s:%d", ip6, (*spec).port);
     }
     break;
