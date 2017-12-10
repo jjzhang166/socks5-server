@@ -3,11 +3,11 @@
   * handling https/http connections with polling api
 
  TODO:
+  * look up domains asynchronically
   * basic proxy authentication
-  * tcp fast open
-  * udp associate command
+  * tcp fast open(only for Linux)
   * udp relay
 
  
-* DEPENDENCY:
+ DEPENDENCY:
   * Libevent(http://libevent.org)
