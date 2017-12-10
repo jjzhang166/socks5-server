@@ -44,8 +44,6 @@
 #define IPV6        4
 #define _DOMAINNAME 3
 
-#define SOCKS_VERSION 5
-
  /* internal event flags */
 #define SINIT      0
 #define SREAD      1 /* reading data that a client send */
@@ -65,9 +63,9 @@ struct addrspec {
   ev_uint16_t port;
 };
 
-struct conn {  
-  struct bufferevent *bev;  
-  struct addrspec *spec;
+struct socks_conn {  
+  struct bufferevent *bev;
+  const char *auth;
 };
 
 struct addrspec * handle_addrspec(ev_uint8_t * buffer);

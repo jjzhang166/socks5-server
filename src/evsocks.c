@@ -31,9 +31,48 @@
 #include <event2/event.h>
 
 #include "internal.h"
-#include "evsocks.h"
 #include "slog.h"
 
+
+const char *auth = NULL;
+
+static struct event_base *base;
+/* status holds current eventbuffer's status */
+static int status;
+static void syntax(void);
+static void event_func(struct bufferevent *bev, short what, void *ctx);
+static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
+static void socks_init_func(struct bufferevent *bev, void *ctx);
+static void async_read_func(struct bufferevent *bev, void *ctx);
+static void async_write_func(struct bufferevent *bev, void *ctx);
+static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
+static void async_auth_func(struct bufferevent *bev, void *ctx);
+static void handle_perpetrators(struct bufferevent *bev);
+static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
+
+
+static void
+syntax(void)
+{
+  printf("Usage: esocks [options...]\n");
+  printf("Options:\n");
+  printf("  -a authentication e.g, -a username:password\n");
+  printf("  -p port\n");
+  printf("  -h host\n");
+  printf("  -v enable verbose output\n");
+  exit(EXIT_SUCCESS);
+}
+
+static void
+signal_func(evutil_socket_t sig_flag, short what, void *ctx)
+{
+  struct event_base *base = ctx;
+  struct timeval delay = {1, 0};
+  int sec = 1;
+  
+  logger_err("Caught an interupt signal; exiting cleanly in %d second(s)", sec);
+  event_base_loopexit(base, &delay);
+}
 
 static void
 handle_perpetrators(struct bufferevent *bev)
@@ -65,8 +104,11 @@ event_func(struct bufferevent *bev, short what, void *ctx)
     logger_info("buffer freed");
     }
 
-    if (what & BEV_EVENT_ERROR)
+    if (what & BEV_EVENT_ERROR) {
       logger_err("event_func with no SDESTROY flag");
+      bufferevent_free(bev);
+      logger_info("buffer freed");      
+    }
 
   if (what & BEV_EVENT_EOF) {
     logger_debug(verbose, "reached EOF");
@@ -79,7 +121,6 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 static void
 socks_init_func(struct bufferevent *bev, void *ctx)
 {
-  /* we will have a talk with our associate */
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
   /* store copied buffer size here */
@@ -92,30 +133,41 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     
   ev_uint8_t reqbuf[buf_size];
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
-
+  
   /* socks payload */
   ev_uint8_t payload[2] = {5, 0};
+
+  if (auth) {
+    logger_debug(verbose, "try to authenticate %s", auth);
+    /* now only support username/password authentication */
+    payload[1] = 2;
+  }
+  
   if (reqbuf[0] == SOCKS_VERSION) {
     
     logger_info("getting a request");
-    
+
     status = SINIT;
     
-  /* 
-   * TODO: in case, spec is null, return a 
-   * proper error message to a client
-   * say ok to our associate */
+  /* write message to clients */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTROY;
     }
 
+    if (auth) {
+      logger_debug(verbose, "callback to auth_func");
+      bufferevent_setcb(bev, async_auth_func,
+			NULL, event_func, associate);
+      return;
+    }
+    
     /* drain first bytes  */
     evbuffer_drain(src, evsize);
-    
+      
     bufferevent_setcb(bev, async_read_func,
 		      async_write_func, event_func, associate);
-    
+
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
     return;
   }
@@ -123,6 +175,35 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   status = SDESTROY;
   logger_err("wrong protocol=%d", reqbuf[0]);
   handle_perpetrators(bev);
+}
+
+static void
+async_auth_func(struct bufferevent *bev, void *ctx)
+{
+  // struct bufferevent *associate = ctx;
+  struct evbuffer *src;
+  ev_uint8_t *buffer;
+  size_t buf_size;
+  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  
+  src = bufferevent_get_input(bev);
+  buf_size = evbuffer_get_length(src);
+  buffer = calloc(buf_size, sizeof(ev_int8_t));
+
+  payload[1] = 2;
+  
+  /* write auth message to clients */
+    if (bufferevent_write(bev, payload, 10)<0) {
+      logger_err("socks_init_func.bufferevent_write");
+      status = SDESTROY;
+    }
+
+  if (evbuffer_copyout(src, buffer, buf_size)<0)
+    logger_err("async_read_func.evbuffer_copyout");
+
+  for (int i =0; i < buf_size; i++)
+    printf("%d ", buffer[i]);
+  puts(" ");
 }
 
 static void
@@ -137,10 +218,15 @@ async_read_func(struct bufferevent *bev, void *ctx)
   
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
-  buffer = malloc(sizeof(ev_int8_t*)*buf_size);
+  buffer = calloc(buf_size, sizeof(ev_int8_t));
   
   if (evbuffer_copyout(src, buffer, buf_size)<0)
     logger_err("async_read_func.evbuffer_copyout");
+
+  if (auth) {
+    /* now only support username/password authentication */
+    payload[1] = 2;
+  }
   
   if (status == SINIT) {    
 
@@ -162,11 +248,15 @@ async_read_func(struct bufferevent *bev, void *ctx)
       break;
 
     default:
-      logger_err("unknown command");
+      logger_err("unknown command %d", buffer[1]);
       status = SDESTROY;
+      spec = NULL;
     }
 
-    if (!spec && status != SDESTROY) {
+    if (status == SDESTROY)
+      logger_err("saying DESTROY");
+    
+    if (!spec) {
       
       logger_warn("spec cannot be NULL");
       status = SDESTROY;
@@ -194,7 +284,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	  logger_err("async_read_func.bufferevent_write");
 	}
       }
-      
+  
       evbuffer_drain(src, buf_size);
       logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
       return;
@@ -234,9 +324,9 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */
   buf_size  = evbuffer_get_length(src);
-  buffer = malloc(sizeof(ev_uint8_t*)*buf_size);
+  buffer = calloc(buf_size, sizeof(ev_uint8_t));
 
-  if (associate == NULL) {
+  if (!associate) {
     /* client left early?? */
     logger_err("asyn_handle_read_from_target: client left");
     status = SDESTROY;
@@ -246,13 +336,12 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
       logger_err("async_handle_read_from_target.evbuffer_copyout");
       status = SDESTROY;
-    }
-
+    } else {
     logger_debug(verbose, "payload to client=%ld", buf_size);
     bufferevent_write(associate, buffer, buf_size);
-    evbuffer_drain(src, buf_size);    
-  }
-  
+    evbuffer_drain(src, buf_size);
+    }
+  }  
 }
 
 static void
@@ -285,6 +374,7 @@ accept_func(struct evconnlistener *listener,
      Both src and dst will have a talk over an bufferevent.
   */
   struct bufferevent *src, *dst;
+
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
 
@@ -292,33 +382,8 @@ accept_func(struct evconnlistener *listener,
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   
-  assert(src && dst);
-
   bufferevent_setcb(src, socks_init_func, NULL, event_func, dst);
   bufferevent_enable(src, EV_READ|EV_WRITE);
-}
-
-static void
-syntax(void)
-{
-  printf("Usage: esocks [options...]\n");
-  printf("Options:\n");
-  printf("  -a authentication e.g, -a username:password\n");
-  printf("  -p port\n");
-  printf("  -h host\n");
-  printf("  -v enable verbose output\n");
-  exit(EXIT_SUCCESS);
-}
-
-static void
-signal_func(evutil_socket_t sig_flag, short what, void *ctx)
-{
-  struct event_base *base = ctx;
-  struct timeval delay = {1, 0};
-  int sec = 1;
-  
-  logger_err("Caught an interupt signal; exiting cleanly in %d second(s)", sec);
-  event_base_loopexit(base, &delay);
 }
 
 int
@@ -336,7 +401,7 @@ main(int argc, char **argv)
   };
   struct options o;
   char opt;  
-  
+
   int socklen, port;  
   struct evconnlistener *listener;  
   static struct sockaddr_storage listen_on_addr;
@@ -364,6 +429,12 @@ main(int argc, char **argv)
   }
   if (!o.port) {
     syntax();
+  }
+  if (!o.auth) {
+    logger_warn("running without authentication...");    
+  } else {
+    auth = calloc(strlen(o.auth), sizeof(char));
+    auth = o.auth;
   }
 
   /* allocate mem for sockaddr_in */
