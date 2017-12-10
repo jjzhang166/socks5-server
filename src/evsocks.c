@@ -172,10 +172,6 @@ async_read_func(struct bufferevent *bev, void *ctx)
       status = SDESTROY;
       
     } else {
-      
-      logger_info("HERE HERE HERE HERE HERE");
-      debug_addr(spec);
-      
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
       /* get this client ready to write */
@@ -286,7 +282,7 @@ accept_func(struct evconnlistener *listener,
 	    struct sockaddr *a, int slen, void *p)
 {
   /* 
-     Both src and dst will have a talk over an evbffer.
+     Both src and dst will have a talk over an bufferevent.
   */
   struct bufferevent *src, *dst;
   src = bufferevent_socket_new(base, fd,
@@ -297,7 +293,7 @@ accept_func(struct evconnlistener *listener,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   
   assert(src && dst);
-  
+
   bufferevent_setcb(src, socks_init_func, NULL, event_func, dst);
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
@@ -305,7 +301,12 @@ accept_func(struct evconnlistener *listener,
 static void
 syntax(void)
 {
-  printf("evsock [-h host] [-p port] [ -v verbose ]\n");
+  printf("Usage: esocks [options...]\n");
+  printf("Options:\n");
+  printf("  -a authentication e.g, -a username:password\n");
+  printf("  -p port\n");
+  printf("  -h host\n");
+  printf("  -v enable verbose output\n");
   exit(EXIT_SUCCESS);
 }
 
@@ -327,12 +328,14 @@ int
 main(int argc, char **argv)
 {
 
-  /* this doesn't seem to work at all */
-  signal(SIGPIPE, SIG_IGN);
+  /* ignore SIGPIPE event */
+  if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+    logger_err("signal(SIGPIPE, SIG_IGN..");
   
   struct options {
     const char *port;
     const char *host;
+    const char *auth;
   };
   struct options o;
   char opt;  
@@ -348,11 +351,12 @@ main(int argc, char **argv)
 
   memset(&o, 0, sizeof(o));
 
-  while ((opt = getopt(argc, argv, "h:p:vuqcs")) != -1) {
+  while ((opt = getopt(argc, argv, "h:p:a:vuqcs")) != -1) {
     switch (opt) {
     case 'v': ++verbose; break;
     case 'h': o.host = optarg; break;
     case 'p': o.port = optarg; break;
+    case 'a': o.auth = optarg; break;
     default: fprintf(stderr, "Unknow option=%c\n", opt); break;      
     }
   }
@@ -394,7 +398,7 @@ main(int argc, char **argv)
     event_base_free(base);
     exit(EXIT_FAILURE);    
   }
-  
+
   logger_info("Server is up and running %s:%s", o.host, o.port);
   logger_info("level=%d", verbose);
 
