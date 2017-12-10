@@ -106,8 +106,6 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
     if (what & BEV_EVENT_ERROR) {
       logger_err("event_func with no SDESTROY flag");
-      bufferevent_free(bev);
-      logger_info("buffer freed");      
     }
 
   if (what & BEV_EVENT_EOF) {
@@ -200,10 +198,6 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 
   if (evbuffer_copyout(src, buffer, buf_size)<0)
     logger_err("async_read_func.evbuffer_copyout");
-
-  for (int i =0; i < buf_size; i++)
-    printf("%d ", buffer[i]);
-  puts(" ");
 }
 
 static void
@@ -253,8 +247,10 @@ async_read_func(struct bufferevent *bev, void *ctx)
       spec = NULL;
     }
 
-    if (status == SDESTROY)
-      logger_err("saying DESTROY");
+    if (status == SDESTROY) {
+      logger_info("destroy");
+      handle_perpetrators(bev);    
+    }  
     
     if (!spec) {
       
@@ -296,15 +292,16 @@ async_read_func(struct bufferevent *bev, void *ctx)
     if (bufferevent_write(associate, buffer, buf_size)<0) {
       logger_err("async_read_func.bufferevent_write");
       status = SDESTROY;
-    }
+    } else {
 
-    logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
-    evbuffer_drain(src, buf_size);
-    logger_debug(verbose, "drain=%ld", buf_size);    
-    bufferevent_setcb(associate, async_handle_read_from_target,
-		      NULL, event_func, bev);
-    bufferevent_enable(associate, EV_READ|EV_WRITE);
-    return;
+      logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
+      evbuffer_drain(src, buf_size);
+      logger_debug(verbose, "drain=%ld", buf_size);    
+      bufferevent_setcb(associate, async_handle_read_from_target,
+			NULL, event_func, bev);
+      bufferevent_enable(associate, EV_READ|EV_WRITE);
+      return;
+    }
   }
   
   if (status == SDESTROY) {
@@ -338,7 +335,11 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
       status = SDESTROY;
     } else {
     logger_debug(verbose, "payload to client=%ld", buf_size);
-    bufferevent_write(associate, buffer, buf_size);
+
+    if (bufferevent_write(associate, buffer, buf_size)<0) {
+      logger_err("async_handle_read_from_target");
+      status = SDESTROY;
+    }
     evbuffer_drain(src, buf_size);
     }
   }  
