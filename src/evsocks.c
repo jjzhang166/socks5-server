@@ -1,7 +1,9 @@
 /* 
+ * Use of this source code is governed by a
+ * license that can be found in the LICENSE file.
+ *
  * Simple proxy server with Libevent 
  * 
- * Copyright (c) 2017 Xun
  *
 */
 
@@ -137,8 +139,6 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   ev_uint8_t payload[2] = {5, 0};
 
   if (auth) {
-    logger_debug(verbose, "try to authenticate %s", auth);
-    /* now only support username/password authentication */
     payload[1] = 2;
   }
   
@@ -209,6 +209,13 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     pad = 6;
     passwdlen = buffer[pad+userlen];
     break;
+  case GSSAPI:
+    logger_info("auth GSSAPI");
+    method = buffer[1];
+    userlen = buffer[4];
+    pad = 5;
+    passwdlen = buffer[pad+userlen];
+    break;
   case IANASSIGNED:
   case 4:
   case 5:
@@ -221,10 +228,16 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     passwdlen = buffer[pad+userlen];
     break;
   default:
-    logger_err("auth methods not supported!");
+    logger_err("auth method(%d) is not supported!", buffer[1]);
     status = SDESTROY;
   }
-
+  
+  if (status == SDESTROY) {
+    logger_info("destroy");
+    handle_perpetrators(bev);
+    return;
+  }
+  
   logger_debug(verbose, "auth method=%d;userl=%d;passwdlen=%d", method, userlen, passwdlen);
   
   user = calloc(userlen, sizeof(char));  /* allocate empty data */
@@ -252,7 +265,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTROY;
     }
-    
+
   } else {
     
     status = SDESTROY;

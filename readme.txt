@@ -11,3 +11,6 @@
  
  DEPENDENCY:
   * Libevent(http://libevent.org)
+
+ LICENSE
+  * MIT
