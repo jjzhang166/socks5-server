@@ -316,9 +316,6 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   struct event_base *base = ctx;
   struct timeval delay = {1, 0};
   int sec = 1;
-
-  if (sig_flag & SIGPIPE)
-    logger_err("this is SIGPIPE.");
   
   logger_err("Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   event_base_loopexit(base, &delay);
