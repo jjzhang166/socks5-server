@@ -94,10 +94,10 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR|BEV_EVENT_CONNECTED)) {
     
-    /* version is wrong, host unreachable or just one of annoying requests
+    /*
     * TODO:
     *   clean up buffers more gently 
-    *   find out what causes errors */
+    */
     if ((what & BEV_EVENT_ERROR && status == SDESTROY)) {
       if (errno)
 	logger_err("event_func");
@@ -124,9 +124,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
-  /* store copied buffer size here */
   ev_ssize_t evsize;
-  /* store size from bev */
   size_t buf_size;
 
   src = bufferevent_get_input(bev);
@@ -134,8 +132,8 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     
   ev_uint8_t reqbuf[buf_size];
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
-  
-  /* socks payload */
+
+  /* its' important to send out thses two bytes */
   ev_uint8_t payload[2] = {5, 0};
 
   if (auth) {
@@ -144,11 +142,10 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   
   if (reqbuf[0] == SOCKS_VERSION) {
     
-    logger_info("getting a request");
+    logger_debug(verbose, "getting a request");
 
     status = SINIT;
     
-    /* write message to clients */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTROY;
@@ -161,7 +158,6 @@ socks_init_func(struct bufferevent *bev, void *ctx)
       return;
     }
     
-    /* drain first bytes  */
     evbuffer_drain(src, evsize);
       
     bufferevent_setcb(bev, async_read_func,
@@ -198,7 +194,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   payload[1] = SOCKSAUTHPASSWORD;
   
   if (evbuffer_copyout(src, buffer, buf_size)<0)
-    logger_err("async_read_func.evbuffer_copyout");
+    logger_err("async_auth_func.evbuffer_copyout");
 
   /* check auth methods here.. */
   switch (buffer[1]) {
@@ -240,8 +236,8 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   
   logger_debug(verbose, "auth method=%d;userl=%d;passwdlen=%d", method, userlen, passwdlen);
   
-  user = calloc(userlen, sizeof(char));  /* allocate empty data */
-  passwd = calloc(passwdlen, sizeof(char)); /* allocate empty data */
+  user = calloc(userlen, sizeof(char));
+  passwd = calloc(passwdlen, sizeof(char));
   authbuf = calloc(userlen+passwdlen+1, sizeof(char));
   
   authlen = userlen + passwdlen
@@ -279,7 +275,6 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 
   } else {  
   
-    /* drain first bytes  */
     evbuffer_drain(src, buf_size);
     
     bufferevent_setcb(bev, async_read_func,
@@ -307,13 +302,13 @@ async_read_func(struct bufferevent *bev, void *ctx)
     logger_err("async_read_func.evbuffer_copyout");
 
   if (auth) {
-    /* now only support username/password authentication */
+    /* authentication code  */
     payload[1] = 2;
   }
   
   if (status == SINIT) {    
 
-    /* parse this header */
+    /* parse socks header */
     switch (buffer[1]) {
     case CONNECT:
       spec = handle_connect(bev, buffer, buf_size);      
@@ -457,14 +452,14 @@ accept_func(struct evconnlistener *listener,
 	    struct sockaddr *a, int slen, void *p)
 {
   /* 
-     Both src and dst will have a talk over an bufferevent.
+     Both src and dst will have a talk over a bufferevent.
   */
   struct bufferevent *src, *dst;
 
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
 
-  /* note: dst's fd should be -1 since we do not want it to connect to target yet */
+  /* fd should be -1 here since we have no fd whatsoever */
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   
@@ -523,7 +518,7 @@ main(int argc, char **argv)
     auth = o.auth;
   }
 
-  /* allocate mem for sockaddr_in */
+  /* allocate space for sockaddr_in */
   memset(&listen_on_addr, 0, sizeof(listen_on_addr));
   socklen = sizeof(listen_on_addr);
   
