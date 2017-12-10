@@ -22,6 +22,23 @@
 /* socks version  */
 #define SOCKS_VERSION 5
 
+/* 
+ * socks auth password protocol
+ *
+ * X'00' NO AUTHENTICATION REQUIRED
+ * X'01' GSSAPI
+ * X'02' USERNAME/PASSWORD
+ * X'03' to X'7F' IANA ASSIGNED
+ * X'80' to X'FE' RESERVED FOR PRIVATE METHODS
+ * X'FF' NO ACCEPTABLE METHODS
+*/
+
+#define SOCKSNOAUTH       0
+#define GSSAPI            1
+#define SOCKSAUTHPASSWORD 2
+#define IANASSIGNED       3 /* curl requests this */
+
+
 /* socks commands */
 #define CONNECT 1
 #define BIND 2
@@ -57,10 +74,10 @@
 struct addrspec {
   short family;
   char *domain;
-  ev_uint64_t s_addr;
   ev_uint8_t *ipv4_addr;
   ev_uint8_t _s6_addr[16];
-  ev_uint16_t port;
+  ev_uint16_t port;  
+  ev_uint64_t s_addr;
 };
 
 struct socks_conn {  
