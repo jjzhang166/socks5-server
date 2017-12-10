@@ -34,7 +34,7 @@ handle_addrspec(ev_uint8_t * buffer)
   char ipv6[INET6_ADDRSTRLEN];
   ev_uint8_t pb[2]; /* 2 bytes for port */
   ev_uint16_t port;
-  struct addrinfo hints, *res; /* for getaddrinfo */
+  struct addrinfo hints, *res, *p; /* for getaddrinfo */
 
   spec = malloc(sizeof(struct addrspec));
 
@@ -77,12 +77,14 @@ handle_addrspec(ev_uint8_t * buffer)
     domlen = buffer[4];
     buflen = domlen+5;
 
-    (*spec).domain = (ev_uint8_t*)calloc(domlen, sizeof(ev_uint8_t));
+    (*spec).domain = calloc(domlen, sizeof(const char));
 
     memcpy((*spec).domain, buffer+5, domlen);    
     
     (*spec).family = 3;
     
+    logger_info("doamin:%s", (*spec).domain);
+	
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -90,13 +92,20 @@ handle_addrspec(ev_uint8_t * buffer)
     if (getaddrinfo((*spec).domain, NULL, &hints, &res)<0) {
       perror("getaddrinfo");
       return NULL;
-    } else {
-      puts("ok");
+    }
+
+    for (p =res; p !=NULL; p =(*p).ai_next) {
+      if ((*p).ai_family == AF_INET) {
+	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
+	(*spec).s_addr = (*v4).sin_addr.s_addr;
+	(*spec).family = AF_INET; /* force to use IPv4.. */
+      }
     }
     
     freeaddrinfo(res);
     logger_debug(verbose, "freed addrinfo");
     break;
+    
   default:
     logger_err("handle_addrspec.switch Unknown atype");
     return NULL;

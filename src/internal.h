@@ -58,7 +58,7 @@
 
 struct addrspec {
   short family;
-  ev_uint8_t *domain;
+  char *domain;
   ev_uint64_t s_addr;
   ev_uint8_t *ipv4_addr;
   ev_uint8_t _s6_addr[16];
