@@ -1,25 +1,55 @@
 # event socks5 server Makefile
 
-PROGRAM = esocks
+# Make the build silent
+V =
 
-LOADLIBS = -levent -levent_core
+ifeq ($(strip $(V)),)
+        E = @echo
+        Q = @
+else
+        E = @\#
+        Q =
+endif
+export E Q
 
-OBJ =  src/evsocks.o src/handlers.o src/slog.o
+uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 
-CFLAGS = -std=c99 -D_XOPEN_SOURCE=600 \
-         -D_DEFAULT_SOURCE \
-         -pedantic \
-	 -Wall \
-	 -W \
-         -Wmissing-prototypes \
-         -Wno-sign-compare \
-         -Wno-unused-parameter
+PROGRAM=esocks
 
-.o :
-	$(CC) -c  $(OBJ) -o $@
+LIBS=-levent -levent_core
 
-$(PROGRAM) : $(OBJ)
-	$(CC) $(OBJ) $(CFLAGS) $(LOADLIBS)  -o $@
+CC=gcc
 
-clean :
-	$(RM) src/*.o
+OBJ=src/evsocks.o src/handlers.o src/slog.o
+
+ifeq ($(uname_S),Linux)
+ DEFINES=-DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
+endif
+ifeq ($(uname_S),FreeBSD)
+ DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_FREEBSD_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
+endif
+ifeq ($(uname_S),Darwin)
+ DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_DARWIN_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
+endif
+
+CFLAGS=-std=c99 \
+        -D_DEFAULT_SOURCE \
+        -pedantic \
+        -Wall \
+        -W \
+        -Wstrict-prototypes \
+        -Wmissing-prototypes \
+        -Wno-sign-compare \
+        -Wno-unused-parameter
+
+
+$(PROGRAM): $(OBJ)
+	$(E) "  LINK    " $@
+	$(Q) $(CC) $(CFLAGS) $(DEFINES) -o $@ $(OBJ) $(LIBS)
+
+clean:
+	$(RM) src/*.o $(PROGRAM)
+
+src/*.c.o:
+	$(E) "  CC      " $@
+	$(Q) ${CC} ${CFLAGS} ${DEFINES} -c $*.c
