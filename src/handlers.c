@@ -23,18 +23,23 @@
 #include "slog.h"
 
 struct addrspec *
-handle_addrspec(ev_uint8_t * buffer)
+handle_addrspec(ev_uint8_t *buffer)
 {
   struct addrspec *spec;
-  ev_uint8_t atype = buffer[3];
-  int buflen, domlen;  
-  ev_uint32_t s_addr;
-  ev_uint8_t ip4[4];
-  uint32_t ipv4;
-  char ipv6[INET6_ADDRSTRLEN];
-  ev_uint8_t pb[2]; /* 2 bytes for port */
-  ev_uint16_t port;
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
+  
+  ev_uint8_t atype = buffer[3];
+  ev_uint8_t ip4[4];
+  ev_uint8_t pb[2]; /* 2 bytes for port */
+  
+  ev_uint16_t port;
+
+  ev_uint32_t ipv4;
+  ev_uint32_t s_addr;
+  
+  char ipv6[INET6_ADDRSTRLEN];
+  
+  int buflen, domlen;    
 
   spec = malloc(sizeof(struct addrspec));
 
@@ -65,15 +70,14 @@ handle_addrspec(ev_uint8_t * buffer)
       return NULL;
     }
     
-    logger_debug(verbose, "v6 %s", ipv6);
-    
+    logger_debug(verbose, "v6 %s", ipv6); 
     break;
   case _DOMAINNAME:
-  /* TODO: 
-   *   lookups faile when Chrome is here
-   *   
-   * Chrome is soooo wrong. Whyyyyyyyyyyy
-  */
+    /* TODO:
+     *  look up domains asynchronically
+     *  most cases, getaddrinfo is stuck here
+     *  and eventually time-out will occur.
+     */
     domlen = buffer[4];
     buflen = domlen+5;
 
