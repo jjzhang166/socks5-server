@@ -141,7 +141,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
   
   if (evbuffer_copyout(src, buffer, buf_size)<0)
     logger_err("async_read_func.evbuffer_copyout");
- 
+  
   if (status == SINIT) {    
 
     /* parse this header */
@@ -166,12 +166,16 @@ async_read_func(struct bufferevent *bev, void *ctx)
       status = SDESTROY;
     }
 
-    if (!spec) {
+    if (!spec && status != SDESTROY) {
       
       logger_warn("spec cannot be NULL");
       status = SDESTROY;
       
     } else {
+      
+      logger_info("HERE HERE HERE HERE HERE");
+      debug_addr(spec);
+      
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
       /* get this client ready to write */
@@ -185,14 +189,16 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	     (struct sockaddr*)&target, sizeof(target))<0){
 	
 	logger_err("is failed bufferevevnt_socket_connect");
+
+	status = SDESTROY;
 	
 	payload[1] = HOST_UNREACHABLE;
 	
 	if (bufferevent_write(bev, payload, 10)<0) {
 	  logger_err("async_read_func.bufferevent_write");
-	  status = SDESTROY;
 	}
       }
+      
       evbuffer_drain(src, buf_size);
       logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
       return;
@@ -205,6 +211,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       logger_err("async_read_func.bufferevent_write");
       status = SDESTROY;
     }
+
     logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
     evbuffer_drain(src, buf_size);
     logger_debug(verbose, "drain=%ld", buf_size);    
@@ -249,12 +256,16 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
     bufferevent_write(associate, buffer, buf_size);
     evbuffer_drain(src, buf_size);    
   }
+  
 }
 
 static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
   ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+
+  if (!bev)
+    status = SDESTROY;
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
@@ -304,6 +315,9 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   struct event_base *base = ctx;
   struct timeval delay = {1, 0};
   int sec = 1;
+
+  if (sig_flag & SIGPIPE)
+    logger_err("this is SIGPIPE.");
   
   logger_err("Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   event_base_loopexit(base, &delay);
@@ -312,6 +326,10 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
 int
 main(int argc, char **argv)
 {
+
+  /* this doesn't seem to work at all */
+  signal(SIGPIPE, SIG_IGN);
+  
   struct options {
     const char *port;
     const char *host;
@@ -323,7 +341,7 @@ main(int argc, char **argv)
   struct evconnlistener *listener;  
   static struct sockaddr_storage listen_on_addr;
   struct event *signal_event;
-
+  
   if (argc < 2 || (strcmp(argv[1], "--help") == 0)) {
     syntax();
   }
@@ -369,7 +387,7 @@ main(int argc, char **argv)
   }
 
   listener = evconnlistener_new_bind(base, accept_func, NULL,
-				     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
+		     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
     logger_err("evconnlistener_new_bind()");
@@ -380,12 +398,13 @@ main(int argc, char **argv)
   logger_info("Server is up and running %s:%s", o.host, o.port);
   logger_info("level=%d", verbose);
 
-  signal_event = event_new(base, SIGINT, EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
-
+  signal_event = event_new(base, SIGINT,
+			   EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
+  
   if (!signal_event || event_add(signal_event, NULL)) {
     logger_errx(1, "Cannot add a signal_event");
   }
-
+  
   event_base_dispatch(base);
   event_base_free(base);
   exit(EXIT_SUCCESS);
