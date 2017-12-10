@@ -33,10 +33,11 @@
 #include "internal.h"
 #include "slog.h"
 
-
+/* store a comma separated character */
 const char *auth = NULL;
 
 static struct event_base *base;
+
 /* status holds current eventbuffer's status */
 static int status;
 static void syntax(void);
@@ -147,7 +148,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
 
     status = SINIT;
     
-  /* write message to clients */
+    /* write message to clients */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTROY;
@@ -178,26 +179,101 @@ socks_init_func(struct bufferevent *bev, void *ctx)
 static void
 async_auth_func(struct bufferevent *bev, void *ctx)
 {
-  // struct bufferevent *associate = ctx;
+  struct bufferevent *associate = ctx;
   struct evbuffer *src;
   ev_uint8_t *buffer;
   size_t buf_size;
-  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  
+  ev_uint8_t payload[2] = {5, 0};
+  char *authbuf;
+  char *user;
+  char *passwd;
+  int userlen, passwdlen, method, pad;
+  size_t authlen;
+
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(ev_int8_t));
-
-  payload[1] = 2;
+  buffer = calloc(buf_size, sizeof(ev_int8_t));  
   
-  /* write auth message to clients */
-    if (bufferevent_write(bev, payload, 10)<0) {
+  /* require clients to send username and password */
+  payload[1] = SOCKSAUTHPASSWORD;
+  
+  if (evbuffer_copyout(src, buffer, buf_size)<0)
+    logger_err("async_read_func.evbuffer_copyout");
+
+  /* check auth methods here.. */
+  switch (buffer[1]) {
+  case SOCKSAUTHPASSWORD:
+    logger_info("auth userlenname/password");
+    method = buffer[1];
+    userlen = buffer[5];
+    pad = 6;
+    passwdlen = buffer[pad+userlen];
+    break;
+  case IANASSIGNED:
+  case 4:
+  case 5:
+  case 6:
+  case 7:
+    logger_info("auth IANA assigned");
+    method = buffer[1];
+    userlen = buffer[6];    
+    pad = 7;
+    passwdlen = buffer[pad+userlen];
+    break;
+  default:
+    logger_err("auth methods not supported!");
+    status = SDESTROY;
+  }
+
+  logger_debug(verbose, "auth method=%d;userl=%d;passwdlen=%d", method, userlen, passwdlen);
+  
+  user = calloc(userlen, sizeof(char));  /* allocate empty data */
+  passwd = calloc(passwdlen, sizeof(char)); /* allocate empty data */
+  authbuf = calloc(userlen+passwdlen+1, sizeof(char));
+  
+  authlen = userlen + passwdlen
+                               + 1  /* an extra for the colon */
+                               + 1; /* an extra for the zero  */
+
+  memcpy(user, buffer+pad, userlen);
+  memcpy(passwd, buffer+pad+userlen+1, passwdlen);
+
+  evutil_snprintf(authbuf, authlen, "%s:%s", user, passwd);  
+
+  /* this is too rough authentication! 
+     Should refactor.
+  */
+  if (strcmp(authbuf, auth) == 0) {
+    logger_info("authenticated");    
+
+    payload[1] = 0;
+    /* send auth message */
+    if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
       status = SDESTROY;
     }
+    
+  } else {
+    
+    status = SDESTROY;
+    
+  }
 
-  if (evbuffer_copyout(src, buffer, buf_size)<0)
-    logger_err("async_read_func.evbuffer_copyout");
+  if (status == SDESTROY) {
+    
+    logger_info("destroy");
+    handle_perpetrators(bev);
+
+  } else {  
+  
+    /* drain first bytes  */
+    evbuffer_drain(src, buf_size);
+    
+    bufferevent_setcb(bev, async_read_func,
+    		      async_write_func, event_func, associate);
+    
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
+  }
 }
 
 static void
@@ -226,21 +302,17 @@ async_read_func(struct bufferevent *bev, void *ctx)
 
     /* parse this header */
     switch (buffer[1]) {
-
     case CONNECT:
       spec = handle_connect(bev, buffer, buf_size);      
       break;
-
     case BIND:
       spec = handle_connect(bev, buffer, buf_size);            
       break;
-      
     case UDPASSOC:
       logger_warn("udp associate is not supported");
       payload[1] = NOT_SUPPORTED;
       status = SDESTROY;
       break;
-
     default:
       logger_err("unknown command %d", buffer[1]);
       status = SDESTROY;
