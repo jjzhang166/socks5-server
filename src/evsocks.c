@@ -44,13 +44,15 @@ static struct event_base *base;
 static int status;
 static void syntax(void);
 static void event_func(struct bufferevent *bev, short what, void *ctx);
-static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
+static void accept_func(struct evconnlistener *listener, evutil_socket_t fd,
+			struct sockaddr *a, int slen, void *p);
 static void socks_init_func(struct bufferevent *bev, void *ctx);
 static void async_read_func(struct bufferevent *bev, void *ctx);
 static void async_write_func(struct bufferevent *bev, void *ctx);
 static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
 static void async_auth_func(struct bufferevent *bev, void *ctx);
 static void async_dns_resolver(struct bufferevent *bev, void *ctx);
+static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void handle_perpetrators(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -60,7 +62,7 @@ syntax(void)
 {
   printf("Usage: esocks [options...]\n");
   printf("Options:\n");
-  printf("  -a authentication e.g, -a username:password\n");
+  printf("  -a USERNAME:PASSWORD\n");
   printf("  -p port\n");
   printf("  -h host\n");
   printf("  -v enable verbose output\n");
@@ -84,7 +86,20 @@ handle_perpetrators(struct bufferevent *bev)
   /* let's destroy this buffer */
   logger_err("version is so wrong");
   logger_info("status=%d", status);
-  bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);  
+  status = SDESTROY;
+  bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);
+}
+
+/* taken from libevent's sample le-proxy.c */
+static void
+close_on_finished_writecb(struct bufferevent *bev, void *ctx)
+{
+  struct evbuffer *evb = bufferevent_get_output(bev);
+
+  if (evbuffer_get_length(evb) == 0) {
+    logger_info("freed");
+    bufferevent_free(bev);
+  }
 }
 
 static void
@@ -93,30 +108,30 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
       
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR|BEV_EVENT_CONNECTED)) {
-    
-    /*
-    * TODO:
-    *   clean up buffers more gently 
-    */
-    if ((what & BEV_EVENT_ERROR && status == SDESTROY)) {
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
+
+    if ((what & BEV_EVENT_ERROR)) {
       if (errno)
-	logger_err("event_func");
-      bufferevent_free(bev);
-    if (associate)
-      bufferevent_free(associate);
-    logger_info("buffer freed");
+	logger_err("event_func");     
     }
 
-    if (what & BEV_EVENT_ERROR) {
-      logger_err("event_func with no SDESTROY flag");
+    if (associate) {
+      if (evbuffer_get_length(
+			      bufferevent_get_output(associate))) {
+	/* We still have to flush data from the other 
+	 * side, but when it's done close the other 
+	 * side. */
+	bufferevent_setcb(bev, NULL, close_on_finished_writecb, event_func, NULL);
+	bufferevent_disable(associate, EV_READ);
+      } else {
+	/* We have nothing left to say to the other 
+         * side; close it! */
+	bufferevent_free(associate);
+      }
+      logger_debug(verbose, "associate buffer was freed");
     }
-
-  if (what & BEV_EVENT_EOF) {
-    logger_debug(verbose, "reached EOF");
-      bufferevent_free(bev);
-      bufferevent_free(associate);
-    }
+    bufferevent_free(bev);
+    logger_debug(verbose, "bev buffer was freed");    
   }
 }
 
