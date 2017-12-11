@@ -56,7 +56,7 @@
 #define TTL_EXPIRED                6
 #define NOT_SUPPORTED              7
 #define ADDRESS_TYPE_NOT_SUPPORTED 8
-#define  UNASSIGNED                9
+#define UNASSIGNED                 9
 
  /* address type */
 #define IPV4        1
@@ -72,6 +72,7 @@
 #define SDESTROY   5 /* free all pending data */
 #define SFINISHED  6 /* client left */
 #define SCONNECTED 7
+#define SDNS       8
 
 struct addrspec {
   short family;
@@ -88,7 +89,6 @@ struct socks_conn {
 };
 
 struct addrspec * handle_addrspec(ev_uint8_t * buffer);
-struct addrspec * handle_connect(struct bufferevent *bev, ev_uint8_t *buffer, ev_ssize_t evsize);
 
 extern void debug_addr(struct addrspec *spec);
 
