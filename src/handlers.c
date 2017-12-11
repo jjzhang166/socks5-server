@@ -82,11 +82,9 @@ handle_addrspec(ev_uint8_t *buffer)
      */
     domlen = buffer[4];
     buflen = domlen+5;
-
-    (*spec).domain = calloc(domlen, sizeof(const char));
-
-    memcpy((*spec).domain, buffer+5, domlen);    
     
+    (*spec).domain = calloc(domlen, sizeof(cosnt char));
+    memcpy((*spec).domain, buffer+5, domlen);        
     (*spec).family = 3;
     
     logger_info("doamin:%s", (*spec).domain);
