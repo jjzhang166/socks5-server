@@ -50,6 +50,7 @@ static void async_read_func(struct bufferevent *bev, void *ctx);
 static void async_write_func(struct bufferevent *bev, void *ctx);
 static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
 static void async_auth_func(struct bufferevent *bev, void *ctx);
+static void async_dns_resolver(struct bufferevent *bev, void *ctx);
 static void handle_perpetrators(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -285,6 +286,28 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 }
 
 static void
+async_dns_resolver(struct bufferevent *bev, void *ctx)
+{
+  ev_uint8_t *buffer = ctx;
+  struct addrspec *spec = malloc(sizeof(struct addrspec));
+  
+  spec = handle_addrspec(buffer);
+
+  status = SDNS;
+  
+  switch ((*spec).family) {
+  case AF_INET:
+  case AF_INET6:
+    break;
+  case 3: /* domain */    
+    break;
+  default: /* ??  */
+    logger_err("Unknown address family, probably an error occured");    
+    break;
+  }
+}
+
+static void
 async_read_func(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *associate = ctx;
@@ -311,15 +334,14 @@ async_read_func(struct bufferevent *bev, void *ctx)
     /* parse socks header */
     switch (buffer[1]) {
     case CONNECT:
-      spec = handle_connect(bev, buffer, buf_size);      
-      break;
     case BIND:
-      spec = handle_connect(bev, buffer, buf_size);            
+      spec = handle_addrspec(buffer);
       break;
     case UDPASSOC:
       logger_warn("udp associate is not supported");
       payload[1] = NOT_SUPPORTED;
       status = SDESTROY;
+      spec = NULL;      
       break;
     default:
       logger_err("unknown command %d", buffer[1]);
@@ -360,7 +382,6 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	  logger_err("async_read_func.bufferevent_write");
 	}
       }
-  
       evbuffer_drain(src, buf_size);
       logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
       return;
