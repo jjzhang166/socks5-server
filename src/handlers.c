@@ -34,14 +34,14 @@ handle_addrspec(ev_uint8_t *buffer)
   ev_uint8_t ip4[4];
   ev_uint8_t pb[2]; /* 2 bytes for port */
   
-  ev_uint16_t port;
+  ev_uint16_t port; /* short for port  */
 
-  ev_uint32_t ipv4;
-  ev_uint32_t s_addr;
+  ev_uint32_t ipv4; /* 32 bits for IPv4 */
+  ev_uint32_t s_addr; /* 32 bits for IPv4 */
   
-  char ipv6[INET6_ADDRSTRLEN];
+  char ipv6[INET6_ADDRSTRLEN]; /* 128 bits for IPv6 */
   
-  int buflen, domlen;    
+  int buflen, domlen;
 
   spec = malloc(sizeof(struct addrspec));
 
@@ -99,19 +99,18 @@ handle_addrspec(ev_uint8_t *buffer)
       perror("getaddrinfo");
       return NULL;
     }
-
+    
     for (p =res; p !=NULL; p =(*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
-	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
-	(*spec).s_addr = (*v4).sin_addr.s_addr;
-	(*spec).family = AF_INET; /* force to use IPv4.. */
+    	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
+    	(*spec).s_addr = (*v4).sin_addr.s_addr;
+    	(*spec).family = AF_INET; /* force to use IPv4.. */
       }
     }
-    
+
     freeaddrinfo(res);
     logger_debug(verbose, "freed addrinfo");
     break;
-    
   default:
     logger_err("handle_addrspec.switch Unknown atype");
     return NULL;
@@ -125,33 +124,6 @@ handle_addrspec(ev_uint8_t *buffer)
   
   return spec;
 }
-
-struct addrspec *
-handle_connect(struct bufferevent *bev, ev_uint8_t *buffer, ev_ssize_t esize)
-{
-  struct addrspec *spec = malloc(sizeof(struct addrspec));
-  size_t len;
-  struct evbuffer *src;
-  
-  src = bufferevent_get_input(bev);
-  len = evbuffer_get_length(src);
-
-  if (esize <=4 )
-    return NULL; /* nothing to get from this buffer */
-  
-  spec = handle_addrspec(buffer);
-
-  /* drain a read buffer */
-  evbuffer_drain(src, len);
-
-  return spec;
-}
-
-/* void 
- * handle_udp_associate()
- *  { 
-} 
-*/
 
 void
 debug_addr(struct addrspec *spec)
