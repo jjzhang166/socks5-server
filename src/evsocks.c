@@ -35,6 +35,8 @@
 #include "internal.h"
 #include "slog.h"
 
+#define u8 ev_uint8_t
+
 /* store a comma separated character */
 const char *auth = NULL;
 
@@ -44,8 +46,7 @@ static struct event_base *base;
 static int status;
 static void syntax(void);
 static void event_func(struct bufferevent *bev, short what, void *ctx);
-static void accept_func(struct evconnlistener *listener, evutil_socket_t fd,
-			struct sockaddr *a, int slen, void *p);
+static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
 static void socks_init_func(struct bufferevent *bev, void *ctx);
 static void async_read_func(struct bufferevent *bev, void *ctx);
 static void async_write_func(struct bufferevent *bev, void *ctx);
@@ -108,7 +109,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
       
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR) || status == SDESTROY) {
 
     if ((what & BEV_EVENT_ERROR)) {
       if (errno)
@@ -146,11 +147,11 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
     
-  ev_uint8_t reqbuf[buf_size];
+  u8 reqbuf[buf_size];
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
 
   /* its' important to send out thses two bytes */
-  ev_uint8_t payload[2] = {5, 0};
+  u8 payload[2] = {5, 0};
 
   if (auth) {
     payload[1] = 2;
@@ -193,9 +194,9 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
-  ev_uint8_t *buffer;
+  u8 *buffer;
   size_t buf_size;
-  ev_uint8_t payload[2] = {5, 0};
+  u8 payload[2] = {5, 0};
   char *authbuf;
   char *user;
   char *passwd;
@@ -303,18 +304,23 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 static void
 async_dns_resolver(struct bufferevent *bev, void *ctx)
 {
-  ev_uint8_t *buffer = ctx;
-  struct addrspec *spec = malloc(sizeof(struct addrspec));
-  
-  spec = handle_addrspec(buffer);
-
+  char b[128];
+  struct addrspec *spec = ctx;
   status = SDNS;
-  
+
   switch ((*spec).family) {
   case AF_INET:
-  case AF_INET6:
+    if (evutil_inet_ntop(AF_INET, &((*spec).ipv4_addr), b, sizeof(b))) {
+      logger_info("v4 failed");
+    }
     break;
-  case 3: /* domain */    
+  case AF_INET6:
+    if (evutil_inet_ntop(AF_INET, &((*spec).ipv6_addr), b, sizeof(b))) {
+      logger_info("v6 failed");
+    }
+    break;
+  case 3: /* domain */
+    logger_info("domain");
     break;
   default: /* ??  */
     logger_err("Unknown address family, probably an error occured");    
@@ -328,9 +334,9 @@ async_read_func(struct bufferevent *bev, void *ctx)
   struct bufferevent *associate = ctx;
   struct evbuffer *src;  
   static struct addrspec *spec;
-  ev_uint8_t *buffer;
+  u8 *buffer;
   size_t buf_size;
-  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
@@ -366,13 +372,27 @@ async_read_func(struct bufferevent *bev, void *ctx)
 
     if (status == SDESTROY) {
       logger_info("destroy");
-      handle_perpetrators(bev);    
-    }  
+      handle_perpetrators(bev);
+      logger_info("return??");
+      return;
+    }
     
+    debug_addr(spec);
+    
+    /* Set callback to check addresses */
+    // bufferevent_setcb(bev, async_dns_resolver, NULL, event_func, spec);
+    // bufferevent_trigger(bev, EV_READ, 0);
+    // return;
+
     if (!spec) {
-      
+
+      /* getaddrinfo failed? */
       logger_warn("spec cannot be NULL");
-      status = SDESTROY;
+      payload[1] = HOST_UNREACHABLE;
+      if (bufferevent_write(bev, payload, 10)<0)
+	logger_err("bufferevent_write");
+      handle_perpetrators(bev);      
+      return;
       
     } else {
       bufferevent_enable(bev, EV_WRITE);
@@ -385,17 +405,15 @@ async_read_func(struct bufferevent *bev, void *ctx)
       target.sin_port = htons((*spec).port);
 
       if (bufferevent_socket_connect(associate,
-	     (struct sockaddr*)&target, sizeof(target))<0){
-	
+	     (struct sockaddr*)&target, sizeof(target))<0){	
 	logger_err("is failed bufferevevnt_socket_connect");
-
-	status = SDESTROY;
-	
-	payload[1] = HOST_UNREACHABLE;
-	
+	status = SDESTROY;	
+	payload[1] = HOST_UNREACHABLE;	
 	if (bufferevent_write(bev, payload, 10)<0) {
-	  logger_err("async_read_func.bufferevent_write");
+	  logger_err("bufferevent_write");
 	}
+	handle_perpetrators(bev);
+	return;
       }
       evbuffer_drain(src, buf_size);
       logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
@@ -433,11 +451,11 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   struct bufferevent *associate = ctx;
   struct evbuffer *src;
   size_t buf_size;
-  ev_uint8_t *buffer;
+  u8 *buffer;
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */
   buf_size  = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(ev_uint8_t));
+  buffer = calloc(buf_size, sizeof(u8));
 
   if (!associate) {
     /* client left early?? */
@@ -464,7 +482,7 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
-  ev_uint8_t payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
 
   if (!bev)
     status = SDESTROY;
