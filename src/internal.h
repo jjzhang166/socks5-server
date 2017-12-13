@@ -21,6 +21,13 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 
+
+#define u64 ev_uint64_t
+#define u32 ev_uint32_t
+#define u16 ev_uint16_t
+#define u8   ev_uint8_t
+
+
 /* socks version  */
 #define SOCKS_VERSION 5
 
@@ -77,18 +84,13 @@
 struct addrspec {
   short family;
   char *domain;
-  ev_uint8_t *ipv4_addr;
-  ev_uint8_t _s6_addr[16];
-  ev_uint16_t port;  
-  ev_uint64_t s_addr;
+  u8 *ipv4_addr;
+  u8 ipv6_addr[16];
+  u16 port;  
+  u64 s_addr;
 };
 
-struct socks_conn {  
-  struct bufferevent *bev;
-  const char *auth;
-};
-
-struct addrspec * handle_addrspec(ev_uint8_t * buffer);
+struct addrspec * handle_addrspec(u8 * buffer);
 
 extern void debug_addr(struct addrspec *spec);
 
