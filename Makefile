@@ -16,11 +16,9 @@ uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 
 PROGRAM=esocks
 
-LIBS=-levent -levent_core
-
 CC=gcc
 
-OBJ=src/evsocks.o src/handlers.o src/slog.o
+OBJ=evsocks.o handlers.o slog.o
 
 ifeq ($(uname_S),Linux)
  DEFINES=-DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
@@ -32,9 +30,10 @@ ifeq ($(uname_S),Darwin)
  DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_DARWIN_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
 endif
 
+LIBS=-levent -levent_core
+
 CFLAGS=-std=c99 \
         -D_DEFAULT_SOURCE \
-        -pedantic \
         -Wall \
         -W \
         -Wstrict-prototypes \
@@ -42,14 +41,14 @@ CFLAGS=-std=c99 \
         -Wno-sign-compare \
         -Wno-unused-parameter
 
-
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(CFLAGS) $(DEFINES) -o $@ $(OBJ) $(LIBS)
+	$(Q) $(CC) $(DEFINES) -o $@ $(OBJ) $(LIBS)
 
 clean:
-	$(RM) src/*.o $(PROGRAM)
+	$(E) "  CLEAN "
+	$(Q) rm -f *.o $(PROGRAM)
 
-src/*.c.o:
+.c.o:
 	$(E) "  CC      " $@
 	$(Q) ${CC} ${CFLAGS} ${DEFINES} -c $*.c
