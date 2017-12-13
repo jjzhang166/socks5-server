@@ -3,9 +3,10 @@
   * handling https/http connections with polling api
 
  TODO:
+  * add tests!
   * look up domains asynchronically
   * basic proxy authentication
-  * tcp fast open(only for Linux)
+  * tcp fast-open(only for Linux)
   * udp relay
 
  
