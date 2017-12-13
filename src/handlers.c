@@ -24,22 +24,24 @@
 #include "internal.h"
 #include "slog.h"
 
+
 struct addrspec *
-handle_addrspec(ev_uint8_t *buffer)
+handle_addrspec(u8 *buffer)
 {
   struct addrspec *spec;
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
   
-  ev_uint8_t atype = buffer[3];
-  ev_uint8_t ip4[4];
-  ev_uint8_t pb[2]; /* 2 bytes for port */
+  u8 atype = buffer[3];
+  u8 ip4[4];
+  u8 pb[2]; /* 2 bytes for port */
   
-  ev_uint16_t port; /* short for port  */
+  u16 port; /* short for port  */
 
-  ev_uint32_t ipv4; /* 32 bits for IPv4 */
-  ev_uint32_t s_addr; /* 32 bits for IPv4 */
+  u32 ipv4; /* 32 bits for IPv4 */
+  u32 s_addr; /* 32 bits for IPv4 */
   
-  char ipv6[INET6_ADDRSTRLEN]; /* 128 bits for IPv6 */
+  // char ipv6[INET6_ADDRSTRLEN]; /* 128 bits for IPv6 */
+  char b[128];
   
   int buflen, domlen;
 
@@ -49,10 +51,10 @@ handle_addrspec(ev_uint8_t *buffer)
   case IPV4:
     buflen = 8;
     memcpy(ip4, buffer+4, 4);
-    ipv4 =   (uint32_t)ip4[0] << 24| /* build address manually ** sigh ** */
-             (uint32_t)ip4[1] << 16|
-             (uint32_t)ip4[2] << 8 |
-             (uint32_t)ip4[3];
+    ipv4 =   (u32)ip4[0] << 24| /* build address manually ** sigh ** */
+             (u32)ip4[1] << 16|
+             (u32)ip4[2] << 8 |
+             (u32)ip4[3];
     s_addr = htonl(ipv4);
     (*spec).s_addr = s_addr;
     (*spec).family = AF_INET;
@@ -60,19 +62,18 @@ handle_addrspec(ev_uint8_t *buffer)
   case IPV6:
     buflen = 20;    
     (*spec).family = AF_INET6;
-    memcpy((*spec)._s6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+    memcpy((*spec).ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
 
-    if (!(evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ipv6, INET6_ADDRSTRLEN))) {
+    if(!(evutil_inet_ntop(AF_INET6, &((*spec).ipv6_addr), b, sizeof(b)))) {
       logger_err("inet_ntop(AF_INET6..");
       return NULL;
     }
 
-    if (evutil_inet_pton(AF_INET6, ipv6, (*spec)._s6_addr)<0) {
+    if (evutil_inet_pton(AF_INET6, b, (*spec).ipv6_addr)<0) {
       logger_err("inet_pton(AF_INET6..");      
       return NULL;
-    }
-    
-    logger_debug(verbose, "v6 %s", ipv6); 
+    }    
+    logger_info("ip6=%s", b); 
     break;
   case _DOMAINNAME:
     /* TODO:
@@ -97,7 +98,7 @@ handle_addrspec(ev_uint8_t *buffer)
       perror("getaddrinfo");
       return NULL;
     }
-    
+
     for (p =res; p !=NULL; p =(*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
     	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
@@ -113,13 +114,9 @@ handle_addrspec(ev_uint8_t *buffer)
     logger_err("handle_addrspec.switch Unknown atype");
     return NULL;
   }
-
   memcpy(&pb, buffer+buflen, sizeof(pb));
   port = pb[0]<<8 | pb[1];
   (*spec).port = port;
-  
-  debug_addr(spec);
-  
   return spec;
 }
 
@@ -127,23 +124,22 @@ void
 debug_addr(struct addrspec *spec)
 {
   /* ip4 and ip6 are for presentation */
-  char ip4[INET_ADDRSTRLEN];
-  char ip6[INET6_ADDRSTRLEN];
+  char b[128];
   
   if (spec == NULL) {
     return;
   }
-  
+  logger_info("debug_addr");
   /* going to present address */
   switch ((*spec).family) {
   case AF_INET:
-    if (evutil_inet_ntop(AF_INET, &((*spec).s_addr), ip4, INET_ADDRSTRLEN)) {
-      logger_info("to v4=%s:%d", ip4, (*spec).port);
+    if (evutil_inet_ntop(AF_INET, &((*spec).s_addr), b, sizeof(b))) {
+      logger_info("to ip4=%s:%d", b, (*spec).port);
     }
     break;
   case AF_INET6:
-    if (evutil_inet_ntop(AF_INET6, &((*spec)._s6_addr), ip6, INET6_ADDRSTRLEN)) {
-      logger_debug(verbose, "to v6=%s:%d", ip6, (*spec).port);
+    if (evutil_inet_ntop(AF_INET6, &((*spec).ipv6_addr), b, sizeof(b))) {
+      logger_info("to ip6=%s:%d", b, (*spec).port);
     }
     break;
   case 3:
