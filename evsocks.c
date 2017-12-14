@@ -316,6 +316,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     }
     
     free(buffer);
+    
     debug_addr(spec);
     
     if (!spec) {
