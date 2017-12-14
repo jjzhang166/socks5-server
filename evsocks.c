@@ -50,9 +50,8 @@ static void async_read_func(struct bufferevent *bev, void *ctx);
 static void async_write_func(struct bufferevent *bev, void *ctx);
 static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
 static void async_auth_func(struct bufferevent *bev, void *ctx);
-static void async_dns_resolver(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
-static void handle_perpetrators(struct bufferevent *bev);
+static void destroy_func(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
 
@@ -80,7 +79,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
 }
 
 static void
-handle_perpetrators(struct bufferevent *bev)
+destroy_func(struct bufferevent *bev)
 {
   /* let's destroy this buffer */
   logger_err("version is so wrong");
@@ -154,7 +153,7 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     status = SINIT;
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
-      handle_perpetrators(bev);
+      destroy_func(bev);
       return;
     }
     if (auth) {
@@ -169,8 +168,8 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
     return;
   }
-  /* This is not a right protocol; destroy this. */
-  handle_perpetrators(bev);
+  /* This is not a right protocol; get this destroyed. */
+  destroy_func(bev);
   logger_err("wrong protocol=%d", reqbuf[0]);
   return;
 }
@@ -228,7 +227,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     break;
   default:
     logger_err("auth method(%d) is not supported!", buffer[1]);
-    handle_perpetrators(bev);
+    destroy_func(bev);
     return;
   }
   
@@ -261,42 +260,15 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   } else {
     status = SDESTROY;
   }
-
+  
   if (status == SDESTROY) {
     logger_info("destroy");
-    handle_perpetrators(bev);
-  } else {    
+    destroy_func(bev);
+  } else {
     evbuffer_drain(src, buf_size);
     bufferevent_setcb(bev, async_read_func,
     		      async_write_func, event_func, associate);
     bufferevent_enable(bev, EV_READ|EV_WRITE);
-  }
-}
-
-static void
-async_dns_resolver(struct bufferevent *bev, void *ctx)
-{
-  char b[128];
-  struct addrspec *spec = ctx;
-  status = SDNS;
-
-  switch ((*spec).family) {
-  case AF_INET:
-    if (!evutil_inet_ntop(AF_INET, &((*spec).ipv4_addr), b, sizeof(b))) {      
-      logger_info("v4 failed");
-    }
-    break;
-  case AF_INET6:
-    if (!evutil_inet_ntop(AF_INET, &((*spec).ipv6_addr), b, sizeof(b))) {
-      logger_info("v6 failed");
-    }
-    break;
-  case 3: /* domain */
-    logger_info("domain");    
-    break;
-  default: /* ??  */
-    logger_err("Unknown address family, probably an error occured");    
-    break;
   }
 }
 
@@ -329,6 +301,9 @@ async_read_func(struct bufferevent *bev, void *ctx)
     case CONNECT:
     case BIND:
       spec = handle_addrspec(buffer);
+      if (!spec) {
+	payload[1] = HOST_UNREACHABLE;
+      }
       break;
     case UDPASSOC:
       logger_warn("udp associate(%d) is not supported", buffer[1]);
@@ -338,21 +313,18 @@ async_read_func(struct bufferevent *bev, void *ctx)
       break;
     default:
       logger_err("unknown command %d", buffer[1]);
-      status = SDESTROY;
-      handle_perpetrators(bev);
+      destroy_func(bev);
       return;
     }
     
     debug_addr(spec);
-
+    
     if (!spec) {
-
       /* getaddrinfo failed? */
       logger_warn("spec cannot be NULL");
-      payload[1] = HOST_UNREACHABLE;
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
-      handle_perpetrators(bev);      
+      destroy_func(bev);      
       return;
       
     } else {
@@ -377,7 +349,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	  if (bufferevent_write(bev, payload, 10)<0) {
 	    logger_err("bufferevent_write");
 	  }
-	  handle_perpetrators(bev);
+	  destroy_func(bev);
 	  return;
 	}
 	evbuffer_drain(src, buf_size);
@@ -403,7 +375,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
     }
   }  
   if (status == SDESTROY) {
-    handle_perpetrators(bev);    
+    destroy_func(bev);    
     return;
   }  
 }
@@ -421,13 +393,12 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   if (!associate) {
     /* client left early?? */
     logger_err("asyn_handle_read_from_target: client left");
-    handle_perpetrators(bev);
+    destroy_func(bev);
     return;
   }
-
+  
   dst = bufferevent_get_output(associate);
   evbuffer_add_buffer(dst, src);
-
   evbuffer_drain(src, buf_size);
 }
 
@@ -435,19 +406,14 @@ static void
 async_write_func(struct bufferevent *bev, void *ctx)
 {
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-
-  if (!bev)
-    status = SDESTROY;
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
       logger_err("async_read_func._write set to SDESTROY");
-      handle_perpetrators(bev);
+      destroy_func(bev);
       return;
-    }
-    
+    }    
     logger_debug(verbose, "async_write_func: wrote");
-    
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);    
   }
@@ -462,14 +428,11 @@ accept_func(struct evconnlistener *listener,
      Both src and dst will have a talk over a bufferevent.
   */
   struct bufferevent *src, *dst;
-
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-
   /* fd should be -1 here since we have no fd whatsoever */
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  
   bufferevent_setcb(src, socks_init_func, NULL, event_func, dst);
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
