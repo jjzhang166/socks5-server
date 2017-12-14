@@ -25,11 +25,11 @@
 #include <signal.h>
 #include <sys/stat.h>
 
-#include <event2/bufferevent.h>
+#include <event2/event.h>
 #include <event2/buffer.h>
+#include <event2/bufferevent.h>
 #include <event2/listener.h>
 #include <event2/util.h>
-#include <event2/event.h>
 
 #include "internal.h"
 #include "slog.h"
@@ -82,8 +82,7 @@ destroy_func(struct bufferevent *bev)
 {
   /* let's destroy this buffer */
   logger_err("version is so wrong");
-  logger_info("status=%d", status);
-  bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);
+  bufferevent_free(bev);
 }
 
 /* taken from libevent's sample le-proxy.c */
@@ -102,46 +101,43 @@ static void
 event_func(struct bufferevent *bev, short what, void *ctx)
 {  
 
-  struct bufferevent *associate = ctx;
+  struct bufferevent *partner = ctx;
       
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
+  if (what & (BEV_EVENT_ERROR|BEV_EVENT_EOF)) {
 
-    if (associate) {
+    if (partner) {
       if (evbuffer_get_length(
-			      bufferevent_get_output(associate))) {
+			      bufferevent_get_output(partner))) {
 	/* We still have to flush data from the other 
 	 * side, but when it's done close the other 
 	 * side. */
-	bufferevent_setcb(associate, NULL,
+	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, event_func, NULL);
-	bufferevent_disable(associate, EV_READ);
+	bufferevent_disable(partner, EV_READ);
       } else {
 	/* We have nothing left to say to the other 
          * side; close it! */
-	bufferevent_free(associate);
+	bufferevent_free(partner);
       }
     }
     bufferevent_free(bev);
-    logger_debug(verbose, "event_func freed");
+    logger_debug(verbose, "event_func freed");    
   }
 }
 
 static void
 socks_init_func(struct bufferevent *bev, void *ctx)
 {
-  struct bufferevent *associate = ctx;
-  struct evbuffer *src;
+  struct bufferevent *partner = ctx;
+  struct evbuffer *src = bufferevent_get_input(bev);
+  size_t buf_size = evbuffer_get_length(src);
   ev_ssize_t evsize;
-  size_t buf_size;
-
-  src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-    
-  u8 reqbuf[buf_size];
-  evsize = evbuffer_copyout(src, reqbuf, buf_size);
 
   /* its' important to send out thses two bytes */
   u8 payload[2] = {5, 0};
+  u8 reqbuf[buf_size];
+
+  evsize = evbuffer_copyout(src, reqbuf, buf_size);
 
   if (auth) {
     payload[1] = 2;
@@ -158,12 +154,12 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     if (auth) {
       logger_debug(verbose, "callback to auth_func");
       bufferevent_setcb(bev, async_auth_func,
-			NULL, event_func, associate);
+			NULL, event_func, partner);
       return;
     }
     evbuffer_drain(src, evsize);
     bufferevent_setcb(bev, async_read_func,
-		      async_write_func, event_func, associate);
+		      async_write_func, event_func, partner);
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
     return;
   }
@@ -176,20 +172,16 @@ socks_init_func(struct bufferevent *bev, void *ctx)
 static void
 async_auth_func(struct bufferevent *bev, void *ctx)
 {
-  struct bufferevent *associate = ctx;
+  struct bufferevent *partner = ctx;
   struct evbuffer *src;
-  u8 *buffer;
-  size_t buf_size;
-  u8 payload[2] = {5, 0};
-  char *authbuf;
-  char *user;
-  char *passwd;
+  u8 *buffer, payload[2] = {5, 0};
+  char *authbuf, *user, *passwd;
   int userlen, passwdlen, method, pad;
-  size_t authlen;
+  size_t buf_size, authlen;
 
   src = bufferevent_get_input(bev);
   buf_size = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(ev_int8_t));  
+  buffer = calloc(buf_size, sizeof(u8));  
   
   /* require clients to send username and password */
   payload[1] = SOCKSAUTHPASSWORD;
@@ -223,14 +215,15 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     userlen = buffer[6];    
     pad = 7;
     passwdlen = buffer[pad+userlen];
-    break;
+    break;    
   default:
     logger_err("auth method(%d) is not supported!", buffer[1]);
+    free(buffer);
     destroy_func(bev);
     return;
   }
   
-  logger_debug(verbose, "auth method=%d;userl=%d;passwdlen=%d", method, userlen, passwdlen);
+  logger_debug(verbose, "auth method=%d;userlen=%d;passwdlen=%d", method, userlen, passwdlen);
   
   user = calloc(userlen, sizeof(char));
   passwd = calloc(passwdlen, sizeof(char));
@@ -242,7 +235,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 
   memcpy(user, buffer+pad, userlen);
   memcpy(passwd, buffer+pad+userlen+1, passwdlen);
-
+  free(buffer);
   evutil_snprintf(authbuf, authlen, "%s:%s", user, passwd);  
 
   /* this is too rough authentication! 
@@ -250,50 +243,57 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   */
   if (strcmp(authbuf, auth) == 0) {
     logger_info("authenticated");    
-
-    payload[1] = 0;
+    payload[1] = SUCCESSED;
     /* send auth message */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
+      free(user);
+      free(passwd);
+      free(authbuf);
+      destroy_func(bev);
+      return;
     }
   } else {
-    status = SDESTROY;
-  }
-  
-  if (status == SDESTROY) {
-    logger_info("destroy");
+    free(user);
+    free(passwd);
+    free(authbuf);
     destroy_func(bev);
-  } else {
-    evbuffer_drain(src, buf_size);
-    bufferevent_setcb(bev, async_read_func,
-    		      async_write_func, event_func, associate);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    return;
   }
+
+  free(user);
+  free(passwd);
+  free(authbuf);  
+  evbuffer_drain(src, buf_size);
+  bufferevent_setcb(bev, async_read_func,
+		    async_write_func, event_func, partner);
+  bufferevent_enable(bev, EV_READ|EV_WRITE);
 }
 
 static void
 async_read_func(struct bufferevent *bev, void *ctx)
 {
-  struct bufferevent *associate = ctx;
+  struct bufferevent *partner = ctx;
   struct evbuffer *src;  
   static struct addrspec *spec;
   u8 *buffer;
-  size_t buf_size;
-  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};  
+  size_t buflen;
   
   src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(ev_int8_t));
+  buflen = evbuffer_get_length(src);
+  buffer = calloc(buflen, sizeof(ev_int8_t));
   
-  if (evbuffer_copyout(src, buffer, buf_size)<0)
+  if (evbuffer_copyout(src, buffer, buflen)<0)
     logger_err("async_read_func.evbuffer_copyout");
 
   if (auth) {
     /* authentication code  */
     payload[1] = 2;
   }
-  
-  if (status == SINIT) {    
+
+  /* Check if version is correct and status is equal to INIT */
+  if (status == SINIT && buffer[0] == SOCKS_VERSION) {
 
     /* parse socks header */
     switch (buffer[1]) {
@@ -305,27 +305,27 @@ async_read_func(struct bufferevent *bev, void *ctx)
       }
       break;
     case UDPASSOC:
-      logger_warn("udp associate(%d) is not supported", buffer[1]);
+      logger_warn("udp partner(%d) is not supported", buffer[1]);
       payload[1] = NOT_SUPPORTED;
-      status = SDESTROY;
       spec = NULL;
       break;
     default:
       logger_err("unknown command %d", buffer[1]);
-      destroy_func(bev);
-      return;
+      payload[1] = GENERAL_FAILURE;
+      spec = NULL;      
     }
     
+    free(buffer);
     debug_addr(spec);
     
     if (!spec) {
       /* getaddrinfo failed? */
-      logger_warn("spec cannot be NULL");
+      logger_warn("destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
-      destroy_func(bev);      
+      free(spec);
+      destroy_func(bev);
       return;
-      
     } else {
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
@@ -339,11 +339,12 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	target.sin_family = AF_INET;
 	target.sin_addr.s_addr = spec->s_addr;
 	target.sin_port = htons(spec->port);
-
-	if (bufferevent_socket_connect(associate,
+	
+	free(spec);
+	
+	if (bufferevent_socket_connect(partner,
 				       (struct sockaddr*)&target, sizeof(target))<0){	
 	  logger_err("failed to connect");
-	  status = SDESTROY;	
 	  payload[1] = HOST_UNREACHABLE;	
 	  if (bufferevent_write(bev, payload, 10)<0) {
 	    logger_err("bufferevent_write");
@@ -351,54 +352,49 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	  destroy_func(bev);
 	  return;
 	}
-	evbuffer_drain(src, buf_size);
-	logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
+	evbuffer_drain(src, buflen);
+	logger_debug(verbose, "socket_connect and drain=%ld", buflen);
 	return;
       }
     }
   }
-  
+
   if (status == SREAD) {
     /* make sure we already have a connection and pull the payload from a client */
-    if (bufferevent_write(associate, buffer, buf_size)<0) {
+    if (bufferevent_write(partner, buffer, buflen)<0) {
       logger_err("async_read_func.bufferevent_write");
       status = SDESTROY;
     } else {
-      logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
-      evbuffer_drain(src, buf_size);
-      logger_debug(verbose, "drain=%ld", buf_size);    
-      bufferevent_setcb(associate, async_handle_read_from_target,
+      logger_debug(verbose, "wrote to target=%ld bytes", buflen);
+      evbuffer_drain(src, buflen);
+      bufferevent_setcb(partner, async_handle_read_from_target,
 			NULL, event_func, bev);
-      bufferevent_enable(associate, EV_READ|EV_WRITE);
+      bufferevent_enable(partner, EV_READ|EV_WRITE);      
       return;
     }
-  }  
-  if (status == SDESTROY) {
-    destroy_func(bev);    
-    return;
-  }  
+  }
 }
 
 static void
 async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 {
-  struct bufferevent *associate = ctx;
+  struct bufferevent *partner = ctx;
   struct evbuffer *src, *dst;
-  size_t buf_size;
+  size_t buflen;
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */
-  buf_size  = evbuffer_get_length(src);
+  buflen  = evbuffer_get_length(src);
 
-  if (!associate) {
+  if (!partner) {
     /* client left early?? */
     logger_err("asyn_handle_read_from_target: client left");
     destroy_func(bev);
     return;
   }
   
-  dst = bufferevent_get_output(associate);
+  dst = bufferevent_get_output(partner);
   evbuffer_add_buffer(dst, src);
-  evbuffer_drain(src, buf_size);
+  evbuffer_drain(src, buflen);
 }
 
 static void
@@ -423,9 +419,6 @@ accept_func(struct evconnlistener *listener,
 	    evutil_socket_t fd,
 	    struct sockaddr *a, int slen, void *p)
 {
-  /* 
-     Both src and dst will have a talk over a bufferevent.
-  */
   struct bufferevent *src, *dst;
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
@@ -448,6 +441,7 @@ main(int argc, char **argv)
   char opt;  
 
   int socklen, port;  
+
   struct evconnlistener *listener;  
   static struct sockaddr_storage listen_on_addr;
   struct event *signal_event;
