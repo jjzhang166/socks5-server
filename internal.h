@@ -81,6 +81,10 @@
 #define SCONNECTED 7
 #define SDNS       8
 
+#define SOCKS_INET_ADDRSTRLEN  (sizeof("255.255.255.255") - 1)
+#define SOCKS_INET6_ADDRSTRLEN \
+  (sizeof("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255") - 1)
+
 struct addrspec {
   short   family;
   char   *domain;
@@ -99,6 +103,6 @@ static int verbose;
 
 u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
-int resolve_host(struct addrspec *spec, int len);
+int resolve_host(char *domain, int len);
 
 #endif
