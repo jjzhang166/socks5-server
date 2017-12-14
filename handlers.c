@@ -78,21 +78,24 @@ handle_addrspec(u8 *buffer)
     domlen = buffer[4];
     buflen = domlen+5;
 
-    (*spec).domain = calloc(domlen, sizeof(char));
-    memcpy((*spec).domain, buffer+5, domlen);        
+    (*spec).domain = calloc(domlen, sizeof(const char));
+    memcpy((*spec).domain, buffer+5, domlen);    
     (*spec).family = 3;
-
-    logger_info("doamin  :%s", (*spec).domain);
       
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-    
-    if (getaddrinfo((*spec).domain, NULL, &hints, &res)<0) {
-      perror("getaddrinfo");
+
+    /* try to check domain.. */
+    if (!strchr(spec->domain, '.')) {
       return NULL;
     }
-
+    
+    if (getaddrinfo((*spec).domain, NULL, &hints, &res)<0) {
+      logger_err("getaddrinfo");
+      return NULL;
+    }
+    
     for (p =res; p !=NULL; p =(*p).ai_next) {
       if ((*p).ai_family == AF_INET) {
     	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
@@ -120,7 +123,7 @@ debug_addr(struct addrspec *spec)
   /* ip4 and ip6 are for presentation */
   char b[128];
   
-  if (spec == NULL) {
+  if (!spec) {
     return;
   }
   logger_info("debug_addr");
