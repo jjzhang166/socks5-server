@@ -30,22 +30,18 @@ handle_addrspec(u8 *buffer)
 {
   struct addrspec *spec;
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
-  
+
+  spec = malloc(sizeof(struct addrspec));
+
+  int buflen, domlen;
+
+  char b[128]; /* 128 bits for addresses */
+  u32 ipv4; /* 32 bits for IPv4 */
+  u32 s_addr; /* 32 bits for IPv4 */
+  u16 port; /* short for port  */
   u8 atype = buffer[3];
   u8 ip4[4];
   u8 pb[2]; /* 2 bytes for port */
-  
-  u16 port; /* short for port  */
-
-  u32 ipv4; /* 32 bits for IPv4 */
-  u32 s_addr; /* 32 bits for IPv4 */
-  
-  // char ipv6[INET6_ADDRSTRLEN]; /* 128 bits for IPv6 */
-  char b[128];
-  
-  int buflen, domlen;
-
-  spec = malloc(sizeof(struct addrspec));
 
   switch (atype) {
   case IPV4:
@@ -63,12 +59,10 @@ handle_addrspec(u8 *buffer)
     buflen = 20;    
     (*spec).family = AF_INET6;
     memcpy((*spec).ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
-
     if(!(evutil_inet_ntop(AF_INET6, &((*spec).ipv6_addr), b, sizeof(b)))) {
       logger_err("inet_ntop(AF_INET6..");
       return NULL;
     }
-
     if (evutil_inet_pton(AF_INET6, b, (*spec).ipv6_addr)<0) {
       logger_err("inet_pton(AF_INET6..");      
       return NULL;
@@ -83,13 +77,13 @@ handle_addrspec(u8 *buffer)
      */
     domlen = buffer[4];
     buflen = domlen+5;
-    
-    (*spec).domain = calloc(domlen, sizeof(const char));
+
+    (*spec).domain = calloc(domlen, sizeof(char));
     memcpy((*spec).domain, buffer+5, domlen);        
     (*spec).family = 3;
-    
-    logger_info("doamin:%s", (*spec).domain);
-	
+
+    logger_info("doamin  :%s", (*spec).domain);
+      
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
