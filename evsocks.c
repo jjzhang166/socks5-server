@@ -87,7 +87,6 @@ handle_perpetrators(struct bufferevent *bev)
   /* let's destroy this buffer */
   logger_err("version is so wrong");
   logger_info("status=%d", status);
-  status = SDESTROY;
   bufferevent_trigger_event(bev, BEV_EVENT_ERROR, 0);
 }
 
@@ -98,7 +97,7 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
   struct evbuffer *evb = bufferevent_get_output(bev);
 
   if (evbuffer_get_length(evb) == 0) {
-    logger_info("freed");
+    logger_info("freed0");
     bufferevent_free(bev);
   }
 }
@@ -109,12 +108,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *associate = ctx;
       
-  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR) || status == SDESTROY) {
-
-    if ((what & BEV_EVENT_ERROR)) {
-      if (errno)
-	logger_err("event_func");     
-    }
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
 
     if (associate) {
       if (evbuffer_get_length(
@@ -129,10 +123,9 @@ event_func(struct bufferevent *bev, short what, void *ctx)
          * side; close it! */
 	bufferevent_free(associate);
       }
-      logger_debug(verbose, "associate buffer was freed");
     }
     bufferevent_free(bev);
-    logger_debug(verbose, "bev buffer was freed");    
+    logger_debug(verbose, "freed");
   }
 }
 
@@ -158,35 +151,29 @@ socks_init_func(struct bufferevent *bev, void *ctx)
   }
   
   if (reqbuf[0] == SOCKS_VERSION) {
-    
     logger_debug(verbose, "getting a request");
-
     status = SINIT;
-    
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
-      status = SDESTROY;
+      handle_perpetrators(bev);
+      return;
     }
-
     if (auth) {
       logger_debug(verbose, "callback to auth_func");
       bufferevent_setcb(bev, async_auth_func,
 			NULL, event_func, associate);
       return;
     }
-    
     evbuffer_drain(src, evsize);
-      
     bufferevent_setcb(bev, async_read_func,
 		      async_write_func, event_func, associate);
-
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
     return;
   }
-
-  status = SDESTROY;
-  logger_err("wrong protocol=%d", reqbuf[0]);
+  /* This is not a right protocol; destroy this. */
   handle_perpetrators(bev);
+  logger_err("wrong protocol=%d", reqbuf[0]);
+  return;
 }
 
 static void
@@ -242,11 +229,6 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     break;
   default:
     logger_err("auth method(%d) is not supported!", buffer[1]);
-    status = SDESTROY;
-  }
-  
-  if (status == SDESTROY) {
-    logger_info("destroy");
     handle_perpetrators(bev);
     return;
   }
@@ -276,27 +258,18 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     /* send auth message */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_init_func.bufferevent_write");
-      status = SDESTROY;
     }
-
   } else {
-    
     status = SDESTROY;
-    
   }
 
   if (status == SDESTROY) {
-    
     logger_info("destroy");
     handle_perpetrators(bev);
-
-  } else {  
-  
+  } else {    
     evbuffer_drain(src, buf_size);
-    
     bufferevent_setcb(bev, async_read_func,
     		      async_write_func, event_func, associate);
-    
     bufferevent_enable(bev, EV_READ|EV_WRITE);
   }
 }
@@ -310,17 +283,17 @@ async_dns_resolver(struct bufferevent *bev, void *ctx)
 
   switch ((*spec).family) {
   case AF_INET:
-    if (evutil_inet_ntop(AF_INET, &((*spec).ipv4_addr), b, sizeof(b))) {
+    if (!evutil_inet_ntop(AF_INET, &((*spec).ipv4_addr), b, sizeof(b))) {      
       logger_info("v4 failed");
     }
     break;
   case AF_INET6:
-    if (evutil_inet_ntop(AF_INET, &((*spec).ipv6_addr), b, sizeof(b))) {
+    if (!evutil_inet_ntop(AF_INET, &((*spec).ipv6_addr), b, sizeof(b))) {
       logger_info("v6 failed");
     }
     break;
   case 3: /* domain */
-    logger_info("domain");
+    logger_info("domain");    
     break;
   default: /* ??  */
     logger_err("Unknown address family, probably an error occured");    
@@ -359,21 +332,15 @@ async_read_func(struct bufferevent *bev, void *ctx)
       spec = handle_addrspec(buffer);
       break;
     case UDPASSOC:
-      logger_warn("udp associate is not supported");
+      logger_warn("udp associate(%d) is not supported", buffer[1]);
       payload[1] = NOT_SUPPORTED;
       status = SDESTROY;
-      spec = NULL;      
+      spec = NULL;
       break;
     default:
       logger_err("unknown command %d", buffer[1]);
       status = SDESTROY;
-      spec = NULL;
-    }
-
-    if (status == SDESTROY) {
-      logger_info("destroy");
       handle_perpetrators(bev);
-      logger_info("return??");
       return;
     }
     
@@ -397,27 +364,32 @@ async_read_func(struct bufferevent *bev, void *ctx)
     } else {
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
-      /* get this client ready to write */
-      /* connects to a target and sets up next events */
-      struct sockaddr_in target;
-      target.sin_family = AF_INET; /* TODO: v6 */
-      target.sin_addr.s_addr = (*spec).s_addr;
-      target.sin_port = htons((*spec).port);
 
-      if (bufferevent_socket_connect(associate,
-	     (struct sockaddr*)&target, sizeof(target))<0){	
-	logger_err("is failed bufferevevnt_socket_connect");
-	status = SDESTROY;	
-	payload[1] = HOST_UNREACHABLE;	
-	if (bufferevent_write(bev, payload, 10)<0) {
-	  logger_err("bufferevent_write");
+     /* TODO: */
+     /*    how about IPv6 */
+      if (spec->family == AF_INET)  {
+	/* get this client ready to write */
+	/* connects to a target and sets up next events */
+	struct sockaddr_in target;
+	target.sin_family = AF_INET;
+	target.sin_addr.s_addr = (*spec).s_addr;
+	target.sin_port = htons((*spec).port);
+
+	if (bufferevent_socket_connect(associate,
+				       (struct sockaddr*)&target, sizeof(target))<0){	
+	  logger_err("failed to connect");
+	  status = SDESTROY;	
+	  payload[1] = HOST_UNREACHABLE;	
+	  if (bufferevent_write(bev, payload, 10)<0) {
+	    logger_err("bufferevent_write");
+	  }
+	  handle_perpetrators(bev);
+	  return;
 	}
-	handle_perpetrators(bev);
+	evbuffer_drain(src, buf_size);
+	logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
 	return;
       }
-      evbuffer_drain(src, buf_size);
-      logger_debug(verbose, "socket_connect and drain=%ld", buf_size);
-      return;
     }
   }
   
@@ -427,7 +399,6 @@ async_read_func(struct bufferevent *bev, void *ctx)
       logger_err("async_read_func.bufferevent_write");
       status = SDESTROY;
     } else {
-
       logger_debug(verbose, "wrote to target=%ld bytes", buf_size);
       evbuffer_drain(src, buf_size);
       logger_debug(verbose, "drain=%ld", buf_size);    
@@ -436,10 +407,8 @@ async_read_func(struct bufferevent *bev, void *ctx)
       bufferevent_enable(associate, EV_READ|EV_WRITE);
       return;
     }
-  }
-  
+  }  
   if (status == SDESTROY) {
-    logger_info("destroy");
     handle_perpetrators(bev);    
     return;
   }  
@@ -460,23 +429,25 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   if (!associate) {
     /* client left early?? */
     logger_err("asyn_handle_read_from_target: client left");
-    status = SDESTROY;
+    handle_perpetrators(bev);
+    return;
   }
 
   if (status == SREAD) {
     if (evbuffer_copyout(src, buffer, buf_size)<0) {
       logger_err("async_handle_read_from_target.evbuffer_copyout");
-      status = SDESTROY;
+      handle_perpetrators(bev);
+      return;
     } else {
-    logger_debug(verbose, "payload to client=%ld", buf_size);
-
-    if (bufferevent_write(associate, buffer, buf_size)<0) {
-      logger_err("async_handle_read_from_target");
-      status = SDESTROY;
+      logger_debug(verbose, "payload to client=%ld", buf_size);
+      if (bufferevent_write(associate, buffer, buf_size)<0) {
+	logger_err("async_handle_read_from_target");
+	handle_perpetrators(bev);
+	return;
+      }
     }
-    evbuffer_drain(src, buf_size);
-    }
-  }  
+  }
+  evbuffer_drain(src, buf_size);
 }
 
 static void
@@ -490,7 +461,8 @@ async_write_func(struct bufferevent *bev, void *ctx)
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
       logger_err("async_read_func._write set to SDESTROY");
-      status = SDESTROY;    
+      handle_perpetrators(bev);
+      return;
     }
     
     logger_debug(verbose, "async_write_func: wrote");
