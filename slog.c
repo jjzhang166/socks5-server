@@ -93,7 +93,7 @@ log_output(int serverity, const char *errstr, const char *fmt, va_list ap)
 static void
 socks_log(int serverity, const char *msg)
 {
-    const char *serverity_str;
+    const char *serverity_str = NULL;
   
     switch (serverity) {
     case SOCKS_LOG_DEBUG:

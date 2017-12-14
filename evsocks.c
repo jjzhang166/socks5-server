@@ -4,7 +4,6 @@
  *
  * Simple proxy server with Libevent 
  * 
- *
 */
 
 #if defined(__APPLE__) && defined(__clang__)
@@ -94,8 +93,8 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
   struct evbuffer *evb = bufferevent_get_output(bev);
 
   if (evbuffer_get_length(evb) == 0) {
-    logger_info("freed0");
     bufferevent_free(bev);
+    logger_debug(verbose, "close_on_finished_writecb freed");    
   }
 }
 
@@ -123,7 +122,7 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       }
     }
     bufferevent_free(bev);
-    logger_debug(verbose, "freed");
+    logger_debug(verbose, "event_func freed");
   }
 }
 
@@ -338,8 +337,8 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	/* connects to a target and sets up next events */
 	struct sockaddr_in target;
 	target.sin_family = AF_INET;
-	target.sin_addr.s_addr = (*spec).s_addr;
-	target.sin_port = htons((*spec).port);
+	target.sin_addr.s_addr = spec->s_addr;
+	target.sin_port = htons(spec->port);
 
 	if (bufferevent_socket_connect(associate,
 				       (struct sockaddr*)&target, sizeof(target))<0){	
@@ -492,10 +491,10 @@ main(int argc, char **argv)
     port = atoi(o.port);
     if (port < 1 || port > 65535)
       syntax();
-    (*sin).sin_port = htons(port);
-    if (evutil_inet_pton(AF_INET, o.host, &((*sin).sin_addr))<0)
+    sin->sin_port = htons(port);
+    if (evutil_inet_pton(AF_INET, o.host, &(sin->sin_addr))<0)
       syntax();
-    (*sin).sin_family = AF_INET;
+    sin->sin_family = AF_INET;
     socklen = sizeof(struct sockaddr_in);
   }
 

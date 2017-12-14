@@ -34,12 +34,12 @@ LIBS=-levent -levent_core
 
 CFLAGS=-std=c99 \
         -D_DEFAULT_SOURCE \
-        -Wall \
         -W \
         -Wstrict-prototypes \
         -Wmissing-prototypes \
         -Wno-sign-compare \
-        -Wno-unused-parameter
+        -Wno-unused-parameter \
+	-O3
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@

@@ -49,8 +49,8 @@
 
 
 /* socks commands */
-#define CONNECT 1
-#define BIND 2
+#define CONNECT  1
+#define BIND     2
 #define UDPASSOC 3
 
  /* server replies */
@@ -82,12 +82,12 @@
 #define SDNS       8
 
 struct addrspec {
-  short family;
-  char *domain;
-  u8 *ipv4_addr;
-  u8 ipv6_addr[16];
-  u16 port;  
-  u64 s_addr;
+  short   family;
+  char   *domain;
+  u8     *ipv4_addr;
+  u8      ipv6_addr[16];
+  u16     port;  
+  u64     s_addr;
 };
 
 struct addrspec * handle_addrspec(u8 * buffer);
@@ -96,5 +96,9 @@ extern void debug_addr(struct addrspec *spec);
 
 /* verbose for verbose log output */
 static int verbose;
+
+u8 * cpystrn(u8 *dst, u8 *src, size_t s);
+
+int resolve_host(struct addrspec *spec, int len);
 
 #endif

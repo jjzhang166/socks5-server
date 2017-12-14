@@ -5,6 +5,7 @@
  * license that can be found in the LICENSE file.
  *
  * Implementation of generic socks handlers 
+ *
 */
 
 #ifdef _WIN32
@@ -52,22 +53,21 @@ handle_addrspec(u8 *buffer)
              (u32)ip4[2] << 8 |
              (u32)ip4[3];
     s_addr = htonl(ipv4);
-    (*spec).s_addr = s_addr;
-    (*spec).family = AF_INET;
+    spec->s_addr = s_addr;
+    spec->family = AF_INET;
     break;
   case IPV6:
     buflen = 20;    
-    (*spec).family = AF_INET6;
-    memcpy((*spec).ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
-    if(!(evutil_inet_ntop(AF_INET6, &((*spec).ipv6_addr), b, sizeof(b)))) {
+    spec->family = AF_INET6;
+    memcpy(spec->ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+    if(!(evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b, sizeof(b)))) {
       logger_err("inet_ntop(AF_INET6..");
       return NULL;
     }
-    if (evutil_inet_pton(AF_INET6, b, (*spec).ipv6_addr)<0) {
+    if (evutil_inet_pton(AF_INET6, b, spec->ipv6_addr)<0) {
       logger_err("inet_pton(AF_INET6..");      
       return NULL;
     }    
-    logger_info("ip6=%s", b); 
     break;
   case _DOMAINNAME:
     /* TODO:
@@ -78,9 +78,9 @@ handle_addrspec(u8 *buffer)
     domlen = buffer[4];
     buflen = domlen+5;
 
-    (*spec).domain = calloc(domlen, sizeof(const char));
-    memcpy((*spec).domain, buffer+5, domlen);    
-    (*spec).family = 3;
+    spec->domain = calloc(domlen, sizeof(const char));
+    spec->family = 3; /* make up a new family... */
+    memcpy(spec->domain, buffer+5, domlen);    
       
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -91,16 +91,16 @@ handle_addrspec(u8 *buffer)
       return NULL;
     }
     
-    if (getaddrinfo((*spec).domain, NULL, &hints, &res)<0) {
-      logger_err("getaddrinfo");
+    if (getaddrinfo((char *) spec->domain, NULL, &hints, &res)<0) {
+      logger_err("host not found");
       return NULL;
     }
     
-    for (p =res; p !=NULL; p =(*p).ai_next) {
-      if ((*p).ai_family == AF_INET) {
-    	struct sockaddr_in* v4 = (struct sockaddr_in*)(*p).ai_addr;
-    	(*spec).s_addr = (*v4).sin_addr.s_addr;
-    	(*spec).family = AF_INET; /* force to use IPv4.. */
+    for (p =res; p !=NULL; p =p->ai_next) {
+      if (p->ai_family == AF_INET) {
+    	struct sockaddr_in* v4 = (struct sockaddr_in*)p->ai_addr;
+    	spec->s_addr = v4->sin_addr.s_addr;
+    	spec->family = AF_INET; /* force to use IPv4.. */
       }
     }
 
@@ -113,8 +113,96 @@ handle_addrspec(u8 *buffer)
   }
   memcpy(&pb, buffer+buflen, sizeof(pb));
   port = pb[0]<<8 | pb[1];
-  (*spec).port = port;
+  spec->port = port;
   return spec;
+}
+
+int
+resolve_host(struct addrspec *spec, int len)
+{
+  struct addrinfo hints, *res, *p;
+  struct sockaddr_in   *sin;
+  struct sockaddr_in6 *sin6;
+  char b[128];
+  int i;
+  u8 *host;
+
+  host = malloc(len + 1);
+
+  if (host == NULL) {
+    return -1; /* error */
+  }
+  
+  (void)cpystrn(host, spec->domain, len+1);
+  
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  /* try to check domain.. */
+  if (!strchr(spec->domain, '.')) {
+    return -1;
+  }
+
+    
+  if (getaddrinfo((char *) spec->domain, NULL, &hints, &res)<0) {
+    logger_err("host not found");
+    return -1;
+  }
+  
+  for (i = 0, p = res; p != NULL; p = p->ai_next) {
+    switch (p->ai_family) {
+    case AF_INET:
+    case AF_INET6:
+    default:
+      continue;
+    }
+    i++;
+  }
+  if (i == 0) { /* no results */
+    logger_err("host not found");
+    return -1;
+  }
+  /* start with AF_INET */
+  for (p = res; p != NULL; p = p->ai_next) {
+    if (p->ai_family != AF_INET)
+      continue;
+    sin = malloc(sizeof(sin));
+    memcpy(sin, p->ai_addr, p->ai_addrlen);
+    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)sin, b, sizeof(b)) == NULL)
+      return -1;
+  }
+  
+  /* then, AF_INET6 */
+  for (p = res; p != NULL; p = p->ai_next) {
+    if (p->ai_family != AF_INET6)
+      continue;    
+    sin6 = malloc(sizeof(sin6));
+    memcpy(sin6, p->ai_addr, p->ai_addrlen);    
+    if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)sin6, b, sizeof(b)) == NULL)
+      return -1;
+  }
+  
+  logger_info("resolve host:%s", b);
+  freeaddrinfo(res);
+  return 1;
+}
+
+
+u8 *
+cpystrn(u8 *dst, u8 *src, size_t s)
+{
+  if (s == 0)
+    return dst;
+  while (--s) {
+    *dst = *src;
+    if (*dst == '\0')
+      return dst;
+    dst++;
+    src++;
+  }
+  *dst = '\0';
+  return dst;
 }
 
 void
@@ -126,21 +214,20 @@ debug_addr(struct addrspec *spec)
   if (!spec) {
     return;
   }
-  logger_info("debug_addr");
   /* going to present address */
-  switch ((*spec).family) {
+  switch (spec->family) {
   case AF_INET:
-    if (evutil_inet_ntop(AF_INET, &((*spec).s_addr), b, sizeof(b))) {
-      logger_info("to ip4=%s:%d", b, (*spec).port);
+    if (evutil_inet_ntop(AF_INET, &(spec->s_addr), b, sizeof(b))) {
+      logger_info("ip4=%s:%d", b, spec->port);
     }
     break;
   case AF_INET6:
-    if (evutil_inet_ntop(AF_INET6, &((*spec).ipv6_addr), b, sizeof(b))) {
-      logger_info("to ip6=%s:%d", b, (*spec).port);
+    if (evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b, sizeof(b))) {
+      logger_info("ip6=%s:%d", b, spec->port);
     }
     break;
   case 3:
-    logger_debug(verbose, "to domain=%s:%d", (*spec).domain, (*spec).port);
+    logger_debug(verbose, "domain=%s:%d", spec->domain, spec->port);
     break;
   default:
     logger_err("Unknow addr family");
