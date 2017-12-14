@@ -476,12 +476,7 @@ accept_func(struct evconnlistener *listener,
 
 int
 main(int argc, char **argv)
-{
-
-  /* ignore SIGPIPE event */
-  // if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
-  //   logger_err("signal(SIGPIPE, SIG_IGN..");
-  
+{  
   struct options {
     const char *port;
     const char *host;
