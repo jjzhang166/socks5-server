@@ -35,8 +35,6 @@
 #include "internal.h"
 #include "slog.h"
 
-#define u8 ev_uint8_t
-
 /* store a comma separated character */
 const char *auth = NULL;
 
@@ -116,7 +114,8 @@ event_func(struct bufferevent *bev, short what, void *ctx)
 	/* We still have to flush data from the other 
 	 * side, but when it's done close the other 
 	 * side. */
-	bufferevent_setcb(bev, NULL, close_on_finished_writecb, event_func, NULL);
+	bufferevent_setcb(associate, NULL,
+			  close_on_finished_writecb, event_func, NULL);
 	bufferevent_disable(associate, EV_READ);
       } else {
 	/* We have nothing left to say to the other 
@@ -345,11 +344,6 @@ async_read_func(struct bufferevent *bev, void *ctx)
     }
     
     debug_addr(spec);
-    
-    /* Set callback to check addresses */
-    // bufferevent_setcb(bev, async_dns_resolver, NULL, event_func, spec);
-    // bufferevent_trigger(bev, EV_READ, 0);
-    // return;
 
     if (!spec) {
 
@@ -366,7 +360,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       status = SREAD;
 
      /* TODO: */
-     /*    how about IPv6 */
+     /*    how about IPv6?? */
       if (spec->family == AF_INET)  {
 	/* get this client ready to write */
 	/* connects to a target and sets up next events */
@@ -418,13 +412,11 @@ static void
 async_handle_read_from_target(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *associate = ctx;
-  struct evbuffer *src;
+  struct evbuffer *src, *dst;
   size_t buf_size;
-  u8 *buffer;
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */
   buf_size  = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(u8));
 
   if (!associate) {
     /* client left early?? */
@@ -433,20 +425,9 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
     return;
   }
 
-  if (status == SREAD) {
-    if (evbuffer_copyout(src, buffer, buf_size)<0) {
-      logger_err("async_handle_read_from_target.evbuffer_copyout");
-      handle_perpetrators(bev);
-      return;
-    } else {
-      logger_debug(verbose, "payload to client=%ld", buf_size);
-      if (bufferevent_write(associate, buffer, buf_size)<0) {
-	logger_err("async_handle_read_from_target");
-	handle_perpetrators(bev);
-	return;
-      }
-    }
-  }
+  dst = bufferevent_get_output(associate);
+  evbuffer_add_buffer(dst, src);
+
   evbuffer_drain(src, buf_size);
 }
 
@@ -498,8 +479,8 @@ main(int argc, char **argv)
 {
 
   /* ignore SIGPIPE event */
-  if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
-    logger_err("signal(SIGPIPE, SIG_IGN..");
+  // if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+  //   logger_err("signal(SIGPIPE, SIG_IGN..");
   
   struct options {
     const char *port;
