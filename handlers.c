@@ -32,8 +32,6 @@ handle_addrspec(u8 *buffer)
   struct addrspec *spec;
   struct addrinfo hints, *res, *p; /* for getaddrinfo */
 
-  spec = malloc(sizeof(struct addrspec));
-
   int buflen, domlen;
 
   char b[128]; /* 128 bits for addresses */
@@ -44,6 +42,13 @@ handle_addrspec(u8 *buffer)
   u8 ip4[4];
   u8 pb[2]; /* 2 bytes for port */
 
+  spec = malloc(sizeof(struct addrspec));
+
+  if (spec == NULL) {
+    logger_err("handle_addrspec.malloc");
+    return NULL;
+  }
+  
   switch (atype) {
   case IPV4:
     buflen = 8;
@@ -62,12 +67,14 @@ handle_addrspec(u8 *buffer)
     memcpy(spec->ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
     if(!(evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b, sizeof(b)))) {
       logger_err("inet_ntop(AF_INET6..");
+      free(spec);
       return NULL;
     }
     if (evutil_inet_pton(AF_INET6, b, spec->ipv6_addr)<0) {
-      logger_err("inet_pton(AF_INET6..");      
+      logger_err("inet_pton(AF_INET6..");
+      free(spec);
       return NULL;
-    }    
+    }
     break;
   case _DOMAINNAME:
     /* TODO:
@@ -88,11 +95,13 @@ handle_addrspec(u8 *buffer)
 
     /* try to check domain.. */
     if (!strchr(spec->domain, '.')) {
+      free(spec);
       return NULL;
     }
     
     if (getaddrinfo((char *) spec->domain, NULL, &hints, &res)<0) {
       logger_err("host not found");
+      free(spec);
       return NULL;
     }
     
@@ -109,6 +118,7 @@ handle_addrspec(u8 *buffer)
     break;
   default:
     logger_err("handle_addrspec.switch Unknown atype");
+    free(spec);
     return NULL;
   }
   memcpy(&pb, buffer+buflen, sizeof(pb));
