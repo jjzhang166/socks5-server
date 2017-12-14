@@ -128,76 +128,81 @@ handle_addrspec(u8 *buffer)
 }
 
 int
-resolve_host(struct addrspec *spec, int len)
+resolve_host(char *domain, int len)
 {
   struct addrinfo hints, *res, *p;
-  struct sockaddr_in   *sin;
-  struct sockaddr_in6 *sin6;
-  char b[128];
+  struct sockaddr_in   sin;
+  struct sockaddr_in6 sin6;
+  char b4[SOCKS_INET_ADDRSTRLEN];
+  char b6[SOCKS_INET6_ADDRSTRLEN];
   int i;
-  u8 *host;
+  u8 *buf;
 
-  host = malloc(len + 1);
+  buf = malloc(len + 1);
 
-  if (host == NULL) {
+  if (buf == NULL) {
     return -1; /* error */
   }
-  
-  (void)cpystrn(host, spec->domain, len+1);
-  
+
+  (void)cpystrn(buf, domain, len+1);
+
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
   /* try to check domain.. */
-  if (!strchr(spec->domain, '.')) {
+  if (!strchr(domain, '.')) {
     return -1;
   }
-
-    
-  if (getaddrinfo((char *) spec->domain, NULL, &hints, &res)<0) {
-    logger_err("host not found");
+  
+  if (getaddrinfo((char *) domain, NULL, &hints, &res)<0) {
+    logger_err("getaddrinfo host not(%s) found", domain);
     return -1;
   }
+  
+  free(buf);
   
   for (i = 0, p = res; p != NULL; p = p->ai_next) {
     switch (p->ai_family) {
     case AF_INET:
     case AF_INET6:
+      break;
     default:
       continue;
     }
     i++;
   }
+  
   if (i == 0) { /* no results */
-    logger_err("host not found");
+    logger_err("host(%s) not found", domain);
     return -1;
   }
+  
   /* start with AF_INET */
   for (p = res; p != NULL; p = p->ai_next) {
     if (p->ai_family != AF_INET)
       continue;
-    sin = malloc(sizeof(sin));
-    memcpy(sin, p->ai_addr, p->ai_addrlen);
-    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)sin, b, sizeof(b)) == NULL)
+    memcpy(&sin, p->ai_addr, p->ai_addrlen);
+    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&(sin.sin_addr),
+			 b4, SOCKS_INET_ADDRSTRLEN) == NULL)
       return -1;
+    logger_info("resolve host->%s", b4);
   }
-  
+
   /* then, AF_INET6 */
   for (p = res; p != NULL; p = p->ai_next) {
     if (p->ai_family != AF_INET6)
       continue;    
-    sin6 = malloc(sizeof(sin6));
-    memcpy(sin6, p->ai_addr, p->ai_addrlen);    
-    if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)sin6, b, sizeof(b)) == NULL)
+    memcpy(&sin6, p->ai_addr, p->ai_addrlen);    
+    if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&(sin6.sin6_addr),
+			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
       return -1;
+    logger_info("resolve host->%s", b6);    
   }
   
-  logger_info("resolve host:%s", b);
   freeaddrinfo(res);
   return 1;
 }
-
 
 u8 *
 cpystrn(u8 *dst, u8 *src, size_t s)
@@ -219,7 +224,8 @@ void
 debug_addr(struct addrspec *spec)
 {
   /* ip4 and ip6 are for presentation */
-  char b[128];
+  char b4[SOCKS_INET_ADDRSTRLEN];
+  char b6[SOCKS_INET6_ADDRSTRLEN];  
   
   if (!spec) {
     return;
@@ -227,13 +233,13 @@ debug_addr(struct addrspec *spec)
   /* going to present address */
   switch (spec->family) {
   case AF_INET:
-    if (evutil_inet_ntop(AF_INET, &(spec->s_addr), b, sizeof(b))) {
-      logger_info("ip4=%s:%d", b, spec->port);
+    if (evutil_inet_ntop(AF_INET, &(spec->s_addr), b4, SOCKS_INET_ADDRSTRLEN)) {
+      logger_info("ip4=%s:%d", b4, spec->port);
     }
     break;
   case AF_INET6:
-    if (evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b, sizeof(b))) {
-      logger_info("ip6=%s:%d", b, spec->port);
+    if (evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b6, SOCKS_INET6_ADDRSTRLEN)) {
+      logger_info("ip6=%s:%d", b6, spec->port);
     }
     break;
   case 3:
