@@ -34,6 +34,8 @@
 #include "internal.h"
 #include "slog.h"
 
+#define MAX_OUTPUT (32*1024)
+
 /* store a comma separated character */
 const char *auth = NULL;
 
@@ -50,6 +52,7 @@ static void async_write_func(struct bufferevent *bev, void *ctx);
 static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
 static void async_auth_func(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
+static void async_drain_buffer_func(struct bufferevent *bev, void *ctx);
 static void destroy_func(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -81,7 +84,6 @@ static void
 destroy_func(struct bufferevent *bev)
 {
   /* let's destroy this buffer */
-  logger_err("version is so wrong");
   bufferevent_free(bev);
 }
 
@@ -235,7 +237,9 @@ async_auth_func(struct bufferevent *bev, void *ctx)
 
   memcpy(user, buffer+pad, userlen);
   memcpy(passwd, buffer+pad+userlen+1, passwdlen);
+  
   free(buffer);
+  
   evutil_snprintf(authbuf, authlen, "%s:%s", user, passwd);  
 
   /* this is too rough authentication! 
@@ -319,12 +323,11 @@ async_read_func(struct bufferevent *bev, void *ctx)
     
     debug_addr(spec);
     
-    if (!spec) {
-      /* getaddrinfo failed? */
-      logger_warn("destroy");
+    if (spec == NULL) {
+      /* spec cannot be NULL */
+      logger_info("destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
-      free(spec);
       destroy_func(bev);
       return;
     } else {
@@ -383,19 +386,36 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   struct evbuffer *src, *dst;
   size_t buflen;
   
-  src = bufferevent_get_input(bev);  /* first pull payload from this client */
+  src = bufferevent_get_input(bev);  /* first pull payload from this client */  
   buflen  = evbuffer_get_length(src);
 
   if (!partner) {
-    /* client left early?? */
-    logger_err("asyn_handle_read_from_target: client left");
-    destroy_func(bev);
+    evbuffer_drain(src, buflen);
     return;
   }
-  
+
   dst = bufferevent_get_output(partner);
   evbuffer_add_buffer(dst, src);
-  evbuffer_drain(src, buflen);
+  
+  if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
+    logger_info("OVER MAX OUTPUT!! %ld", evbuffer_get_length(dst));
+    /* choke partner til drain out this huge buffer */
+    bufferevent_setcb(partner, async_handle_read_from_target,
+		      async_drain_buffer_func, event_func, bev);
+    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
+    bufferevent_disable(bev, EV_READ);
+  }
+}
+
+static void
+async_drain_buffer_func(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *partner = ctx;
+  bufferevent_setcb(bev,
+		    async_handle_read_from_target, NULL, event_func, partner);  
+  bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
+  if (partner)
+    bufferevent_enable(partner, EV_READ);  
 }
 
 static void
