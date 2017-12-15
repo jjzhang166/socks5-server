@@ -103,6 +103,6 @@ static int verbose;
 
 u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
-int resolve_host(char *domain, int len);
+int resolve_host(char *domain, int len, struct addrspec *spec);
 
 #endif

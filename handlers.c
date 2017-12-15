@@ -30,7 +30,7 @@ struct addrspec *
 handle_addrspec(u8 *buffer)
 {
   struct addrspec *spec;
-  struct addrinfo hints, *res, *p; /* for getaddrinfo */
+  // struct addrinfo hints, *res, *p; /* for getaddrinfo */
 
   int buflen, domlen;
 
@@ -86,35 +86,12 @@ handle_addrspec(u8 *buffer)
     buflen = domlen+5;
 
     spec->domain = calloc(domlen, sizeof(const char));
-    spec->family = 3; /* make up a new family... */
-    memcpy(spec->domain, buffer+5, domlen);    
-      
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    /* try to check domain.. */
-    if (!strchr(spec->domain, '.')) {
-      free(spec);
-      return NULL;
-    }
+    spec->family = AF_INET;
+    memcpy(spec->domain, buffer+5, domlen);
     
-    if (getaddrinfo((char *) spec->domain, NULL, &hints, &res)<0) {
-      logger_err("host not found");
-      free(spec);
+    if (resolve_host(spec->domain, domlen, spec)<0)
       return NULL;
-    }
-    
-    for (p =res; p !=NULL; p =p->ai_next) {
-      if (p->ai_family == AF_INET) {
-    	struct sockaddr_in* v4 = (struct sockaddr_in*)p->ai_addr;
-    	spec->s_addr = v4->sin_addr.s_addr;
-    	spec->family = AF_INET; /* force to use IPv4.. */
-      }
-    }
-
-    freeaddrinfo(res);
-    logger_debug(verbose, "freed addrinfo");
+        
     break;
   default:
     logger_err("handle_addrspec.switch Unknown atype");
@@ -128,7 +105,7 @@ handle_addrspec(u8 *buffer)
 }
 
 int
-resolve_host(char *domain, int len)
+resolve_host(char *domain, int len, struct addrspec *spec)
 {
   struct addrinfo hints, *res, *p;
   struct sockaddr_in   sin;
@@ -186,6 +163,10 @@ resolve_host(char *domain, int len)
     if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&(sin.sin_addr),
 			 b4, SOCKS_INET_ADDRSTRLEN) == NULL)
       return -1;
+    
+    if (spec != NULL)
+      spec->s_addr = sin.sin_addr.s_addr;
+    
     logger_info("resolve host->%s", b4);
   }
 
@@ -197,6 +178,7 @@ resolve_host(char *domain, int len)
     if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&(sin6.sin6_addr),
 			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
       return -1;
+    
     logger_info("resolve host->%s", b6);    
   }
   
@@ -241,9 +223,6 @@ debug_addr(struct addrspec *spec)
     if (evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b6, SOCKS_INET6_ADDRSTRLEN)) {
       logger_info("ip6=%s:%d", b6, spec->port);
     }
-    break;
-  case 3:
-    logger_debug(verbose, "domain=%s:%d", spec->domain, spec->port);
     break;
   default:
     logger_err("Unknow addr family");
