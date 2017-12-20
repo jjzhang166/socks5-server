@@ -34,7 +34,7 @@
 #include "internal.h"
 #include "slog.h"
 
-#define MAX_OUTPUT (32*1024)
+#define MAX_OUTPUT (32 * 1024)
 
 /* store a comma separated character */
 const char *auth = NULL;
@@ -62,9 +62,9 @@ syntax(void)
 {
   printf("Usage: esocks [options...]\n");
   printf("Options:\n");
-  printf("  -a USERNAME:PASSWORD\n");
   printf("  -p port\n");
   printf("  -h host\n");
+  printf("  -a USERNAME:PASSWORD\n");  
   printf("  -v enable verbose output\n");
   exit(EXIT_SUCCESS);
 }
@@ -373,7 +373,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
       evbuffer_drain(src, buflen);
       bufferevent_setcb(partner, async_handle_read_from_target,
 			NULL, event_func, bev);
-      bufferevent_enable(partner, EV_READ|EV_WRITE);      
+      bufferevent_enable(partner, EV_READ);      
       return;
     }
   }
@@ -389,20 +389,16 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);  /* first pull payload from this client */  
   buflen  = evbuffer_get_length(src);
 
-  if (!partner) {
-    evbuffer_drain(src, buflen);
-    return;
-  }
-
   dst = bufferevent_get_output(partner);
+  /* Send data to the other side */
   evbuffer_add_buffer(dst, src);
   
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
     logger_info("OVER MAX OUTPUT!! %ld", evbuffer_get_length(dst));
     /* choke partner til drain out this huge buffer */
-    bufferevent_setcb(partner, async_handle_read_from_target,
-		      async_drain_buffer_func, event_func, bev);
-    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
+    bufferevent_setcb(bev, NULL,
+		      async_drain_buffer_func, event_func, partner);
+    bufferevent_setwatermark(partner, EV_WRITE, 0, MAX_OUTPUT);
     bufferevent_disable(bev, EV_READ);
   }
 }
@@ -414,8 +410,9 @@ async_drain_buffer_func(struct bufferevent *bev, void *ctx)
   bufferevent_setcb(bev,
 		    async_handle_read_from_target, NULL, event_func, partner);  
   bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
-  if (partner)
-    bufferevent_enable(partner, EV_READ);  
+  if (partner) {
+    bufferevent_enable(partner, EV_READ);
+  }
 }
 
 static void
@@ -490,9 +487,7 @@ main(int argc, char **argv)
   if (!o.port) {
     syntax();
   }
-  if (!o.auth) {
-    logger_warn("running without authentication...");    
-  } else {
+  if (o.auth) {
     auth = calloc(strlen(o.auth), sizeof(char));
     auth = o.auth;
   }
