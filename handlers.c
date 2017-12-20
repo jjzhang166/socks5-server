@@ -113,15 +113,6 @@ resolve_host(char *domain, int len, struct addrspec *spec)
   char b4[SOCKS_INET_ADDRSTRLEN];
   char b6[SOCKS_INET6_ADDRSTRLEN];
   int i;
-  u8 *buf;
-
-  buf = malloc(len + 1);
-
-  if (buf == NULL) {
-    return -1; /* error */
-  }
-
-  (void)cpystrn(buf, domain, len+1);
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -136,8 +127,6 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     logger_err("getaddrinfo host not(%s) found", domain);
     return -1;
   }
-  
-  free(buf);
   
   for (i = 0, p = res; p != NULL; p = p->ai_next) {
     switch (p->ai_family) {
