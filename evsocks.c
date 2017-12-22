@@ -34,7 +34,7 @@
 #include "internal.h"
 #include "slog.h"
 
-#define MAX_OUTPUT (32 * 1024)
+#define MAX_OUTPUT (512 * 1024)
 
 /* store a comma separated character */
 const char *auth = NULL;
@@ -44,16 +44,16 @@ static struct event_base *base;
 /* status holds current eventbuffer's status */
 static int status;
 static void syntax(void);
-static void event_func(struct bufferevent *bev, short what, void *ctx);
-static void accept_func(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
-static void socks_init_func(struct bufferevent *bev, void *ctx);
-static void async_read_func(struct bufferevent *bev, void *ctx);
-static void async_write_func(struct bufferevent *bev, void *ctx);
-static void async_handle_read_from_target(struct bufferevent *bev, void *ctx);
+static void eventcb(struct bufferevent *bev, short what, void *ctx);
+static void acceptcb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
+static void socks_intcb(struct bufferevent *bev, void *ctx);
+static void readcb(struct bufferevent *bev, void *ctx);
+static void writecb(struct bufferevent *bev, void *ctx);
+static void readcb_from_target(struct bufferevent *bev, void *ctx);
 static void async_auth_func(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
-static void async_drain_buffer_func(struct bufferevent *bev, void *ctx);
-static void destroy_func(struct bufferevent *bev);
+static void drained_writecb(struct bufferevent *bev, void *ctx);
+static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
 
@@ -81,10 +81,11 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
 }
 
 static void
-destroy_func(struct bufferevent *bev)
+destroycb(struct bufferevent *bev)
 {
   /* let's destroy this buffer */
   bufferevent_free(bev);
+  status = 0;  
 }
 
 /* taken from libevent's sample le-proxy.c */
@@ -100,7 +101,7 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
 }
 
 static void
-event_func(struct bufferevent *bev, short what, void *ctx)
+eventcb(struct bufferevent *bev, short what, void *ctx)
 {  
 
   struct bufferevent *partner = ctx;
@@ -108,13 +109,16 @@ event_func(struct bufferevent *bev, short what, void *ctx)
   if (what & (BEV_EVENT_ERROR|BEV_EVENT_EOF)) {
 
     if (partner) {
+      
+      readcb_from_target(bev, ctx);
+
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
 	/* We still have to flush data from the other 
 	 * side, but when it's done close the other 
 	 * side. */
 	bufferevent_setcb(partner, NULL,
-			  close_on_finished_writecb, event_func, NULL);
+			  close_on_finished_writecb, eventcb, NULL);
 	bufferevent_disable(partner, EV_READ);
       } else {
 	/* We have nothing left to say to the other 
@@ -123,12 +127,12 @@ event_func(struct bufferevent *bev, short what, void *ctx)
       }
     }
     bufferevent_free(bev);
-    logger_debug(verbose, "event_func freed");    
+    logger_debug(verbose, "eventcb freed");    
   }
 }
 
 static void
-socks_init_func(struct bufferevent *bev, void *ctx)
+socks_intcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
@@ -149,24 +153,24 @@ socks_init_func(struct bufferevent *bev, void *ctx)
     logger_debug(verbose, "getting a request");
     status = SINIT;
     if (bufferevent_write(bev, payload, 2)<0) {
-      logger_err("socks_init_func.bufferevent_write");
-      destroy_func(bev);
+      logger_err("socks_intcb.bufferevent_write");
+      destroycb(bev);
       return;
     }
     if (auth) {
       logger_debug(verbose, "callback to auth_func");
       bufferevent_setcb(bev, async_auth_func,
-			NULL, event_func, partner);
+			NULL, eventcb, partner);
       return;
     }
     evbuffer_drain(src, evsize);
-    bufferevent_setcb(bev, async_read_func,
-		      async_write_func, event_func, partner);
+    bufferevent_setcb(bev, readcb,
+		      writecb, eventcb, partner);
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
     return;
   }
   /* This is not a right protocol; get this destroyed. */
-  destroy_func(bev);
+  destroycb(bev);
   logger_err("wrong protocol=%d", reqbuf[0]);
   return;
 }
@@ -221,7 +225,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   default:
     logger_err("auth method(%d) is not supported!", buffer[1]);
     free(buffer);
-    destroy_func(bev);
+    destroycb(bev);
     return;
   }
   
@@ -250,18 +254,18 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     payload[1] = SUCCESSED;
     /* send auth message */
     if (bufferevent_write(bev, payload, 2)<0) {
-      logger_err("socks_init_func.bufferevent_write");
+      logger_err("socks_intcb.bufferevent_write");
       free(user);
       free(passwd);
       free(authbuf);
-      destroy_func(bev);
+      destroycb(bev);
       return;
     }
   } else {
     free(user);
     free(passwd);
     free(authbuf);
-    destroy_func(bev);
+    destroycb(bev);
     return;
   }
 
@@ -269,13 +273,13 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   free(passwd);
   free(authbuf);  
   evbuffer_drain(src, buf_size);
-  bufferevent_setcb(bev, async_read_func,
-		    async_write_func, event_func, partner);
+  bufferevent_setcb(bev, readcb,
+		    writecb, eventcb, partner);
   bufferevent_enable(bev, EV_READ|EV_WRITE);
 }
 
 static void
-async_read_func(struct bufferevent *bev, void *ctx)
+readcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src;  
@@ -289,7 +293,7 @@ async_read_func(struct bufferevent *bev, void *ctx)
   buffer = calloc(buflen, sizeof(ev_int8_t));
   
   if (evbuffer_copyout(src, buffer, buflen)<0)
-    logger_err("async_read_func.evbuffer_copyout");
+    logger_err("readcb.evbuffer_copyout");
 
   if (auth) {
     /* authentication code  */
@@ -328,9 +332,10 @@ async_read_func(struct bufferevent *bev, void *ctx)
       logger_info("destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
-      destroy_func(bev);
+      destroycb(bev);
       return;
     } else {
+      
       bufferevent_enable(bev, EV_WRITE);
       status = SREAD;
 
@@ -353,9 +358,10 @@ async_read_func(struct bufferevent *bev, void *ctx)
 	  if (bufferevent_write(bev, payload, 10)<0) {
 	    logger_err("bufferevent_write");
 	  }
-	  destroy_func(bev);
+	  destroycb(bev);
 	  return;
 	}
+	
 	evbuffer_drain(src, buflen);
 	logger_debug(verbose, "socket_connect and drain=%ld", buflen);
 	return;
@@ -366,21 +372,20 @@ async_read_func(struct bufferevent *bev, void *ctx)
   if (status == SREAD) {
     /* make sure we already have a connection and pull the payload from a client */
     if (bufferevent_write(partner, buffer, buflen)<0) {
-      logger_err("async_read_func.bufferevent_write");
-      status = SDESTROY;
-    } else {
-      logger_debug(verbose, "wrote to target=%ld bytes", buflen);
-      evbuffer_drain(src, buflen);
-      bufferevent_setcb(partner, async_handle_read_from_target,
-			NULL, event_func, bev);
-      bufferevent_enable(partner, EV_READ);      
+      logger_err("readcb.bufferevent_write");
+      destroycb(bev);
       return;
     }
+    logger_debug(verbose, "wrote to target=%ld bytes", buflen);
+    evbuffer_drain(src, buflen);
+    bufferevent_setcb(partner, readcb_from_target,
+		      NULL, eventcb, bev);
+    bufferevent_enable(partner, EV_READ);
   }
 }
 
 static void
-async_handle_read_from_target(struct bufferevent *bev, void *ctx)
+readcb_from_target(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src, *dst;
@@ -389,51 +394,56 @@ async_handle_read_from_target(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);  /* first pull payload from this client */  
   buflen  = evbuffer_get_length(src);
 
+  if (!partner) {
+    logger_info("I have no partner!!");
+    exit(1);
+  }
+  
   dst = bufferevent_get_output(partner);
   /* Send data to the other side */
-  evbuffer_add_buffer(dst, src);
-  
+  if (evbuffer_add_buffer(dst, src)<0) {
+    destroycb(bev);
+    destroycb(partner);    
+  }
+
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
-    logger_info("OVER MAX OUTPUT!! %ld", evbuffer_get_length(dst));
-    /* choke partner til drain out this huge buffer */
-    bufferevent_setcb(bev, NULL,
-		      async_drain_buffer_func, event_func, partner);
-    bufferevent_setwatermark(partner, EV_WRITE, 0, MAX_OUTPUT);
-    bufferevent_disable(bev, EV_READ);
+    /* logger_info("OVER MAX OUTPUT!!!!"); */
+    bufferevent_setcb(partner, readcb_from_target, drained_writecb, eventcb, bev);
+    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
+    bufferevent_enable(partner, EV_WRITE);    
   }
 }
 
 static void
-async_drain_buffer_func(struct bufferevent *bev, void *ctx)
+drained_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  bufferevent_setcb(bev,
-		    async_handle_read_from_target, NULL, event_func, partner);  
+  
+  bufferevent_setcb(bev, readcb_from_target, NULL, eventcb, partner);  
   bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
-  if (partner) {
-    bufferevent_enable(partner, EV_READ);
-  }
+  if (partner)
+    bufferevent_enable(partner, EV_WRITE);
 }
 
 static void
-async_write_func(struct bufferevent *bev, void *ctx)
+writecb(struct bufferevent *bev, void *ctx)
 {
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
-      logger_err("async_read_func._write set to SDESTROY");
-      destroy_func(bev);
+      logger_err("readcb._write set to SDESTROY");
+      destroycb(bev);
       return;
     }    
-    logger_debug(verbose, "async_write_func: wrote");
+    logger_debug(verbose, "writecb: wrote");
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);    
   }
 }
 
 static void
-accept_func(struct evconnlistener *listener,
+acceptcb(struct evconnlistener *listener,
 	    evutil_socket_t fd,
 	    struct sockaddr *a, int slen, void *p)
 {
@@ -443,7 +453,7 @@ accept_func(struct evconnlistener *listener,
   /* fd should be -1 here since we have no fd whatsoever */
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  bufferevent_setcb(src, socks_init_func, NULL, event_func, dst);
+  bufferevent_setcb(src, socks_intcb, NULL, eventcb, dst);
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
 
@@ -513,7 +523,7 @@ main(int argc, char **argv)
     logger_errx(1, "event_base_new()");
   }
 
-  listener = evconnlistener_new_bind(base, accept_func, NULL,
+  listener = evconnlistener_new_bind(base, acceptcb, NULL,
 		     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
