@@ -393,11 +393,6 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   
   src = bufferevent_get_input(bev);  /* first pull payload from this client */  
   buflen  = evbuffer_get_length(src);
-
-  if (!partner) {
-    logger_info("I have no partner!!");
-    exit(1);
-  }
   
   dst = bufferevent_get_output(partner);
   /* Send data to the other side */
