@@ -36,7 +36,6 @@
 
 #define MAX_OUTPUT (512 * 1024)
 
-/* store a comma separated character */
 const char *auth = NULL;
 
 static struct event_base *base;
@@ -110,8 +109,8 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 
     if (partner) {
       
-      readcb_from_target(bev, ctx);
-
+      readcb_from_target(bev, NULL);
+      
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
 	/* We still have to flush data from the other 
@@ -176,124 +175,20 @@ socks_intcb(struct bufferevent *bev, void *ctx)
 }
 
 static void
-async_auth_func(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *partner = ctx;
-  struct evbuffer *src;
-  u8 *buffer, payload[2] = {5, 0};
-  char *authbuf, *user, *passwd;
-  int userlen, passwdlen, method, pad;
-  size_t buf_size, authlen;
-
-  src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-  buffer = calloc(buf_size, sizeof(u8));  
-  
-  /* require clients to send username and password */
-  payload[1] = SOCKSAUTHPASSWORD;
-  
-  if (evbuffer_copyout(src, buffer, buf_size)<0)
-    logger_err("async_auth_func.evbuffer_copyout");
-
-  /* check auth methods here.. */
-  switch (buffer[1]) {
-  case SOCKSAUTHPASSWORD:
-    logger_info("auth userlenname/password");
-    method = buffer[1];
-    userlen = buffer[5];
-    pad = 6;
-    passwdlen = buffer[pad+userlen];
-    break;
-  case GSSAPI:
-    logger_info("auth GSSAPI");
-    method = buffer[1];
-    userlen = buffer[4];
-    pad = 5;
-    passwdlen = buffer[pad+userlen];
-    break;
-  case IANASSIGNED:
-  case 4:
-  case 5:
-  case 6:
-  case 7:
-    logger_info("auth IANA assigned");
-    method = buffer[1];
-    userlen = buffer[6];    
-    pad = 7;
-    passwdlen = buffer[pad+userlen];
-    break;    
-  default:
-    logger_err("auth method(%d) is not supported!", buffer[1]);
-    free(buffer);
-    destroycb(bev);
-    return;
-  }
-  
-  logger_debug(verbose, "auth method=%d;userlen=%d;passwdlen=%d", method, userlen, passwdlen);
-  
-  user = calloc(userlen, sizeof(char));
-  passwd = calloc(passwdlen, sizeof(char));
-  authbuf = calloc(userlen+passwdlen+1, sizeof(char));
-  
-  authlen = userlen + passwdlen
-                               + 1  /* an extra for the colon */
-                               + 1; /* an extra for the zero  */
-
-  memcpy(user, buffer+pad, userlen);
-  memcpy(passwd, buffer+pad+userlen+1, passwdlen);
-  
-  free(buffer);
-  
-  evutil_snprintf(authbuf, authlen, "%s:%s", user, passwd);  
-
-  /* this is too rough authentication! 
-     Should refactor.
-  */
-  if (strcmp(authbuf, auth) == 0) {
-    logger_info("authenticated");    
-    payload[1] = SUCCESSED;
-    /* send auth message */
-    if (bufferevent_write(bev, payload, 2)<0) {
-      logger_err("socks_intcb.bufferevent_write");
-      free(user);
-      free(passwd);
-      free(authbuf);
-      destroycb(bev);
-      return;
-    }
-  } else {
-    free(user);
-    free(passwd);
-    free(authbuf);
-    destroycb(bev);
-    return;
-  }
-
-  free(user);
-  free(passwd);
-  free(authbuf);  
-  evbuffer_drain(src, buf_size);
-  bufferevent_setcb(bev, readcb,
-		    writecb, eventcb, partner);
-  bufferevent_enable(bev, EV_READ|EV_WRITE);
-}
-
-static void
 readcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  struct evbuffer *src;  
+  struct evbuffer *src, *dst;
   static struct addrspec *spec;
-  u8 *buffer;
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};  
   size_t buflen;
-  
+
   src = bufferevent_get_input(bev);
   buflen = evbuffer_get_length(src);
-  buffer = calloc(buflen, sizeof(ev_int8_t));
   
-  if (evbuffer_copyout(src, buffer, buflen)<0)
-    logger_err("readcb.evbuffer_copyout");
+  u8 buffer[buflen];
+  
+  evbuffer_copyout(src, buffer, buflen);
 
   if (auth) {
     /* authentication code  */
@@ -322,8 +217,6 @@ readcb(struct bufferevent *bev, void *ctx)
       payload[1] = GENERAL_FAILURE;
       spec = NULL;      
     }
-    
-    free(buffer);
     
     debug_addr(spec);
     
@@ -370,14 +263,13 @@ readcb(struct bufferevent *bev, void *ctx)
   }
 
   if (status == SREAD) {
-    /* make sure we already have a connection and pull the payload from a client */
     if (bufferevent_write(partner, buffer, buflen)<0) {
-      logger_err("readcb.bufferevent_write");
-      destroycb(bev);
+      destroycb(partner);
       return;
     }
-    logger_debug(verbose, "wrote to target=%ld bytes", buflen);
+    /* don't forget drain buffer */
     evbuffer_drain(src, buflen);
+
     bufferevent_setcb(partner, readcb_from_target,
 		      NULL, eventcb, bev);
     bufferevent_enable(partner, EV_READ);
@@ -391,21 +283,26 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   struct evbuffer *src, *dst;
   size_t buflen;
   
-  src = bufferevent_get_input(bev);  /* first pull payload from this client */  
+  src = bufferevent_get_input(bev);
   buflen  = evbuffer_get_length(src);
+
+  if (!partner) {
+    evbuffer_drain(src, buflen);
+    return;
+  }
   
   dst = bufferevent_get_output(partner);
+  
   /* Send data to the other side */
   if (evbuffer_add_buffer(dst, src)<0) {
-    destroycb(bev);
-    destroycb(partner);    
+    destroycb(partner);
   }
 
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
-    /* logger_info("OVER MAX OUTPUT!!!!"); */
-    bufferevent_setcb(partner, readcb_from_target, drained_writecb, eventcb, bev);
-    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
-    bufferevent_enable(partner, EV_WRITE);    
+    bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);
+    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
+			     MAX_OUTPUT);
+    bufferevent_disable(bev, EV_READ);    
   }
 }
 
@@ -414,10 +311,11 @@ drained_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   
-  bufferevent_setcb(bev, readcb_from_target, NULL, eventcb, partner);  
+  bufferevent_setcb(bev, readcb_from_target,
+		    NULL, eventcb, partner);  
   bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
-  if (partner)
-    bufferevent_enable(partner, EV_WRITE);
+  if (partner)  
+    bufferevent_enable(partner, EV_READ);
 }
 
 static void
@@ -427,11 +325,9 @@ writecb(struct bufferevent *bev, void *ctx)
   
   if (status == SINIT) {
     if (bufferevent_write(bev, payload, 10)<0) {
-      logger_err("readcb._write set to SDESTROY");
       destroycb(bev);
       return;
     }    
-    logger_debug(verbose, "writecb: wrote");
     /* choke client */
     bufferevent_disable(bev, EV_WRITE);    
   }
@@ -540,4 +436,108 @@ main(int argc, char **argv)
   event_base_dispatch(base);
   event_base_free(base);
   exit(EXIT_SUCCESS);
+}
+
+
+static void
+async_auth_func(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *partner = ctx;
+  struct evbuffer *src;
+  u8 *buffer, payload[2] = {5, 0};
+  char *authbuf, *user, *passwd;
+  int userlen, passwdlen, method, pad;
+  size_t buf_size, authlen;
+
+  src = bufferevent_get_input(bev);
+  buf_size = evbuffer_get_length(src);
+  buffer = calloc(buf_size, sizeof(u8));  
+  
+  /* require clients to send username and password */
+  payload[1] = SOCKSAUTHPASSWORD;
+  
+  if (evbuffer_copyout(src, buffer, buf_size)<0)
+    logger_err("async_auth_func.evbuffer_copyout");
+
+  /* check auth methods here.. */
+  switch (buffer[1]) {
+  case SOCKSAUTHPASSWORD:
+    logger_info("auth userlenname/password");
+    method = buffer[1];
+    userlen = buffer[5];
+    pad = 6;
+    passwdlen = buffer[pad+userlen];
+    break;
+  case GSSAPI:
+    logger_info("auth GSSAPI");
+    method = buffer[1];
+    userlen = buffer[4];
+    pad = 5;
+    passwdlen = buffer[pad+userlen];
+    break;
+  case IANASSIGNED:
+  case 4:
+  case 5:
+  case 6:
+  case 7:
+    logger_info("auth IANA assigned");
+    method = buffer[1];
+    userlen = buffer[6];    
+    pad = 7;
+    passwdlen = buffer[pad+userlen];
+    break;    
+  default:
+    logger_err("auth method(%d) is not supported!", buffer[1]);
+    free(buffer);
+    destroycb(bev);
+    return;
+  }
+  
+  logger_debug(verbose, "auth method=%d;userlen=%d;passwdlen=%d", method, userlen, passwdlen);
+  
+  user = calloc(userlen, sizeof(char));
+  passwd = calloc(passwdlen, sizeof(char));
+  authbuf = calloc(userlen+passwdlen+1, sizeof(char));
+  
+  authlen = userlen + passwdlen
+                               + 1  /* an extra for the colon */
+                               + 1; /* an extra for the zero  */
+
+  memcpy(user, buffer+pad, userlen);
+  memcpy(passwd, buffer+pad+userlen+1, passwdlen);
+  
+  free(buffer);
+  
+  evutil_snprintf(authbuf, authlen, "%s:%s", user, passwd);  
+
+  /* this is too rough authentication! 
+     Should refactor.
+  */
+  if (strcmp(authbuf, auth) == 0) {
+    logger_info("authenticated");    
+    payload[1] = SUCCESSED;
+    /* send auth message */
+    if (bufferevent_write(bev, payload, 2)<0) {
+      logger_err("socks_intcb.bufferevent_write");
+      free(user);
+      free(passwd);
+      free(authbuf);
+      destroycb(bev);
+      return;
+    }
+  } else {
+    free(user);
+    free(passwd);
+    free(authbuf);
+    destroycb(bev);
+    return;
+  }
+
+  free(user);
+  free(passwd);
+  free(authbuf);  
+  evbuffer_drain(src, buf_size);
+  bufferevent_setcb(bev, readcb,
+		    writecb, eventcb, partner);
+  bufferevent_enable(bev, EV_READ|EV_WRITE);
 }

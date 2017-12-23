@@ -167,7 +167,7 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&(sin6.sin6_addr),
 			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
       return -1;
-    
+
     logger_info("resolve host->%s", b6);    
   }
   
