@@ -3,11 +3,8 @@
   * handling https/http connections with polling api
 
  TODO:
-  * add tests!
-  * look up domains asynchronically
-  * basic proxy authentication
-  * tcp fast-open(only for Linux)
-  * udp relay
+  * add test
+  * getaddrinfo is blocking, so the best option is probably evutil_getaddrinfo()
 
  
  DEPENDENCY:
