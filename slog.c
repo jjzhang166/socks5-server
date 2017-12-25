@@ -58,7 +58,6 @@ logger_debug(int v, const char *fmt, ...)
   }
 }
 
-
 void
 logger_info(const char *fmt, ...)
 {

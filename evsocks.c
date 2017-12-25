@@ -10,8 +10,6 @@
 #program clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
-#include <assert.h>
-
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcip.h>
@@ -25,11 +23,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 
-#include <event2/event.h>
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
 #include <event2/listener.h>
-#include <event2/util.h>
 
 #include "internal.h"
 #include "slog.h"
@@ -40,16 +34,16 @@ const char *auth = NULL;
 
 static struct event_base *base;
 
-/* status holds current eventbuffer's status */
+/* status holds a future event status */
 static int status;
 static void syntax(void);
 static void eventcb(struct bufferevent *bev, short what, void *ctx);
 static void acceptcb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *a, int slen, void *p);
-static void socks_intcb(struct bufferevent *bev, void *ctx);
+static void socks_initcb(struct bufferevent *bev, void *ctx);
 static void readcb(struct bufferevent *bev, void *ctx);
 static void writecb(struct bufferevent *bev, void *ctx);
 static void readcb_from_target(struct bufferevent *bev, void *ctx);
-static void async_auth_func(struct bufferevent *bev, void *ctx);
+static void authorize_cb(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void drained_writecb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
@@ -104,12 +98,15 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 {  
 
   struct bufferevent *partner = ctx;
-      
-  if (what & (BEV_EVENT_ERROR|BEV_EVENT_EOF)) {
+
+  if (what & BEV_EVENT_ERROR)
+    logger_err("evencb");
+  
+  if (what & BEV_EVENT_EOF) {
 
     if (partner) {
       
-      readcb_from_target(bev, NULL);
+      readcb_from_target(bev, partner);
       
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
@@ -131,7 +128,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 }
 
 static void
-socks_intcb(struct bufferevent *bev, void *ctx)
+socks_initcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
@@ -152,13 +149,13 @@ socks_intcb(struct bufferevent *bev, void *ctx)
     logger_debug(verbose, "getting a request");
     status = SINIT;
     if (bufferevent_write(bev, payload, 2)<0) {
-      logger_err("socks_intcb.bufferevent_write");
+      logger_err("socks_initcb.bufferevent_write");
       destroycb(bev);
       return;
     }
     if (auth) {
       logger_debug(verbose, "callback to auth_func");
-      bufferevent_setcb(bev, async_auth_func,
+      bufferevent_setcb(bev, authorize_cb,
 			NULL, eventcb, partner);
       return;
     }
@@ -242,8 +239,6 @@ readcb(struct bufferevent *bev, void *ctx)
 	target.sin_addr.s_addr = spec->s_addr;
 	target.sin_port = htons(spec->port);
 	
-	free(spec);
-	
 	if (bufferevent_socket_connect(partner,
 				       (struct sockaddr*)&target, sizeof(target))<0){	
 	  logger_err("failed to connect");
@@ -254,6 +249,8 @@ readcb(struct bufferevent *bev, void *ctx)
 	  destroycb(bev);
 	  return;
 	}
+
+	free(spec);
 	
 	evbuffer_drain(src, buflen);
 	logger_debug(verbose, "socket_connect and drain=%ld", buflen);
@@ -299,10 +296,11 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   }
 
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
+    logger_debug(verbose, "exceeding MAX_OUTPUT %ld", evbuffer_get_length(dst));
     bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);
     bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
-			     MAX_OUTPUT);
-    bufferevent_disable(bev, EV_READ);    
+ 			     MAX_OUTPUT);
+    bufferevent_disable(bev, EV_READ);
   }
 }
 
@@ -310,12 +308,13 @@ static void
 drained_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  
+  logger_debug(verbose, "EXCEEDING MAX_OUTPUT %ld",
+	       evbuffer_get_length(bufferevent_get_output(bev)));  
   bufferevent_setcb(bev, readcb_from_target,
-		    NULL, eventcb, partner);  
+		    NULL, eventcb, partner);
   bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
   if (partner)  
-    bufferevent_enable(partner, EV_READ);
+    bufferevent_enable(bev, EV_READ);
 }
 
 static void
@@ -344,7 +343,7 @@ acceptcb(struct evconnlistener *listener,
   /* fd should be -1 here since we have no fd whatsoever */
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  bufferevent_setcb(src, socks_intcb, NULL, eventcb, dst);
+  bufferevent_setcb(src, socks_initcb, NULL, eventcb, dst);
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
 
@@ -423,24 +422,24 @@ main(int argc, char **argv)
     exit(EXIT_FAILURE);    
   }
 
-  logger_info("Server is up and running %s:%s", o.host, o.port);
+  logger_info("%s:%s", o.host, o.port);
   logger_info("level=%d", verbose);
 
   signal_event = event_new(base, SIGINT,
 			   EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
-  
+
   if (!signal_event || event_add(signal_event, NULL)) {
     logger_errx(1, "Cannot add a signal_event");
   }
   
   event_base_dispatch(base);
   event_base_free(base);
-  exit(EXIT_SUCCESS);
+  exit(0);
 }
 
 
 static void
-async_auth_func(struct bufferevent *bev, void *ctx)
+authorize_cb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src;
@@ -457,7 +456,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
   payload[1] = SOCKSAUTHPASSWORD;
   
   if (evbuffer_copyout(src, buffer, buf_size)<0)
-    logger_err("async_auth_func.evbuffer_copyout");
+    logger_err("authorize_cb.evbuffer_copyout");
 
   /* check auth methods here.. */
   switch (buffer[1]) {
@@ -518,7 +517,7 @@ async_auth_func(struct bufferevent *bev, void *ctx)
     payload[1] = SUCCESSED;
     /* send auth message */
     if (bufferevent_write(bev, payload, 2)<0) {
-      logger_err("socks_intcb.bufferevent_write");
+      logger_err("socks_initcb.bufferevent_write");
       free(user);
       free(passwd);
       free(authbuf);

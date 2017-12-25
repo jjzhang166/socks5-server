@@ -29,18 +29,15 @@
 struct addrspec *
 handle_addrspec(u8 *buffer)
 {
-  struct addrspec *spec;
-  // struct addrinfo hints, *res, *p; /* for getaddrinfo */
-
+  struct addrspec *spec;  
   int buflen, domlen;
-
   char b[128]; /* 128 bits for addresses */
   u32 ipv4; /* 32 bits for IPv4 */
   u32 s_addr; /* 32 bits for IPv4 */
   u16 port; /* short for port  */
   u8 atype = buffer[3];
   u8 ip4[4];
-  u8 pb[2]; /* 2 bytes for port */
+  u8  pb[2]; /* 2 bytes for port */
 
   spec = malloc(sizeof(struct addrspec));
 
@@ -91,7 +88,8 @@ handle_addrspec(u8 *buffer)
     
     if (resolve_host(spec->domain, domlen, spec)<0)
       return NULL;
-        
+    
+    free(spec->domain);
     break;
   default:
     logger_err("handle_addrspec.switch Unknown atype");
@@ -155,8 +153,8 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     
     if (spec != NULL)
       spec->s_addr = sin.sin_addr.s_addr;
-    
-    logger_info("resolve host->%s", b4);
+
+    logger_info("%s->%s", domain, b4);
   }
 
   /* then, AF_INET6 */
@@ -168,7 +166,7 @@ resolve_host(char *domain, int len, struct addrspec *spec)
 			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
       return -1;
 
-    logger_info("resolve host->%s", b6);    
+    logger_info("%s->%s", domain, b6);    
   }
   
   freeaddrinfo(res);

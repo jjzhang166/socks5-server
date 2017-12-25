@@ -4,8 +4,8 @@
 
 #include <stdarg.h>
 
-#ifndef LOG_INTERNAL_H
-#define LOG_INTERNAL_H
+#ifndef SLOG_H
+#define SLOG_H
 
 #ifdef __GNUC__
 #define S_CHECK_FMT(a,b) __attribute__((format(printf, a, b)))
@@ -27,4 +27,5 @@ void logger_warn(const char *fmt, ...) S_CHECK_FMT(1,2);
 void logger_debug(int v, const char *fmt, ...) S_CHECK_FMT(2, 3);
 void logger_info(const char *fmt, ...) S_CHECK_FMT(1,2);
 void log_output(int serverity, const char *errstr, const char *fmt, va_list ap) S_CHECK_FMT(3,0);
+
 #endif

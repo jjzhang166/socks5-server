@@ -11,16 +11,17 @@
 #ifndef INTERNAL_H
 #define INTERNAL_H
 
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
+#include <event2/event.h>
+#include <event2/util.h>
+
+#include <assert.h>
 #include <stdio.h>
-#include <stdlib.h> /* EXIT_SUCCESS and EXIT_FAILURE */
+#include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-
-#include <event2/bufferevent.h>
-#include <event2/buffer.h>
-#include <event2/util.h>
-
 
 #define u64 ev_uint64_t
 #define u32 ev_uint32_t
@@ -88,18 +89,17 @@
 struct addrspec {
   short   family;
   char   *domain;
-  u8     *ipv4_addr;
   u8      ipv6_addr[16];
   u16     port;  
   u64     s_addr;
 };
 
+/* verbose for verbose log output */
+static int verbose;
+
 struct addrspec * handle_addrspec(u8 * buffer);
 
 extern void debug_addr(struct addrspec *spec);
-
-/* verbose for verbose log output */
-static int verbose;
 
 u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
