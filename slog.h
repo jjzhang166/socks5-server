@@ -2,10 +2,10 @@
  * slog.h
 */
 
-#include <stdarg.h>
-
 #ifndef SLOG_H
 #define SLOG_H
+
+#include <stdarg.h>
 
 #ifdef __GNUC__
 #define S_CHECK_FMT(a,b) __attribute__((format(printf, a, b)))
