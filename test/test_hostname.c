@@ -1,39 +1,33 @@
 
-#include "assert.h"
 #include "../internal.h"
+#include "../async_dns.h"
+#include "tiny_test.h"
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
-
-struct regress_host {
-  u8 *domain;
-  u8 port[2];
-  int len;
-};
+static struct event_base *base;
 
 static struct regress_host hosts[] = {
   { "google.com", {1, 187}, 10 },
   { "tools.ietf.org" , {1, 187}, 14 },
   { "monkey.org", {1, 187}, 10 }
 };
+
 int
 test_name()
 {
   size_t i;
-  
+  announce("test_name");
   for (i =0; i < ARRAY_SIZE(hosts); i++)
-    assert(resolve_host(hosts[i].domain, hosts[i].len, NULL));
-  fprintf(stdout, "OK: test_name\n");
+    if (resolve_host(hosts[i].domain, hosts[i].len, NULL) < 0)
+	test_failed("resolve_host=%s", hosts[i].domain);
+    else
+      test_ok("resolve_host=%s", hosts[i].domain);
+  
   return 1;
 }
 
-struct regress_bytes_data {
-  const char *name;
-  u8 buffer[256];
-};
-
 int test_handle_addr()
-{
-  size_t i;
+{  
+  size_t i; 
   struct regress_bytes_data test_data[] = {
     { "google.com",
       { 5, 0, 0, 3, 10, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109 }}, /* google.com */
@@ -45,10 +39,41 @@ int test_handle_addr()
       { 5, 0, 0, 3, 15, 119, 119, 119, 46, 119, 97, 110, 103, 97, 102, 117, 46, 110, 101, 116 }} /* www.wangafu.net */
   };
 
+  announce("test_handle_addr");
+  
   for (i =0; i < ARRAY_SIZE(test_data); i++) {
-    assert(handle_addrspec((test_data[i]).buffer));
+    if (handle_addrspec((test_data[i]).buffer) == NULL)
+      test_failed("handle_addrspec");
+    else
+      test_ok("%s", test_data[i].name);
   }
-  fprintf(stdout, "OK: test_handle_addr\n");
+}
+
+int test_resolvecb()
+{
+  size_t i;
+  int res;  
+  const char *names[] = {
+    "google.com", "github.com", "tools.ietf.org"
+  };
+
+  announce("test_resolvecb");
+  
+  base = event_base_new();
+  assert(base);
+
+  struct evdns_base *dnsbase = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);
+  assert(dnsbase);
+
+  for (i = 0; i < ARRAY_SIZE(names); i++) {    
+    if (resolve_name(dnsbase, names[i], "8.8.8.8", "8.8.4.4") == 1)
+      test_failed("resolve_name");
+    else
+      test_ok("resole_name");
+  }
+
+  evdns_base_free(dnsbase, 0);
+  event_base_free(base);
 }
 
 int
@@ -56,4 +81,5 @@ main()
 {
   test_name();
   test_handle_addr();
+  test_resolvecb();
 }
