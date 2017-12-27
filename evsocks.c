@@ -58,7 +58,7 @@ syntax(void)
   printf("  -p port\n");
   printf("  -h host\n");
   printf("  -a USERNAME:PASSWORD\n");  
-  printf("  -v enable verbose output\n");
+  printf("  -d debug\n");
   exit(EXIT_SUCCESS);
 }
 
@@ -77,8 +77,8 @@ static void
 destroycb(struct bufferevent *bev)
 {
   /* let's destroy this buffer */
-  bufferevent_free(bev);
   status = 0;  
+  bufferevent_free(bev);
 }
 
 /* taken from libevent's sample le-proxy.c */
@@ -98,15 +98,16 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 {  
 
   struct bufferevent *partner = ctx;
-
-  if (what & BEV_EVENT_ERROR)
-    logger_err("evencb");
   
-  if (what & BEV_EVENT_EOF) {
-
+  if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
+    
+    if (what & BEV_EVENT_ERROR)
+      logger_err("eventcb");
+    
     if (partner) {
-      
-      readcb_from_target(bev, partner);
+
+      /* Flush leftover */
+      readcb_from_target(bev, ctx);
       
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
@@ -122,8 +123,8 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 	bufferevent_free(partner);
       }
     }
+    logger_debug(verbose, "freed");
     bufferevent_free(bev);
-    logger_debug(verbose, "eventcb freed");    
   }
 }
 
@@ -284,10 +285,10 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   buflen  = evbuffer_get_length(src);
 
   if (!partner) {
+    logger_debug(verbose, "readcb_from_target drain");
     evbuffer_drain(src, buflen);
     return;
   }
-  
   dst = bufferevent_get_output(partner);
   
   /* Send data to the other side */
@@ -300,7 +301,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
     bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);
     bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
  			     MAX_OUTPUT);
-    bufferevent_disable(bev, EV_READ);
+    bufferevent_disable(partner, EV_READ);
   }
 }
 
@@ -310,11 +311,10 @@ drained_writecb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   logger_debug(verbose, "EXCEEDING MAX_OUTPUT %ld",
 	       evbuffer_get_length(bufferevent_get_output(bev)));  
-  bufferevent_setcb(bev, readcb_from_target,
-		    NULL, eventcb, partner);
-  bufferevent_setwatermark(bev, EV_WRITE, 0, 0);
-  if (partner)  
-    bufferevent_enable(bev, EV_READ);
+  bufferevent_setcb(partner, readcb_from_target,
+		    NULL, eventcb, bev);
+  bufferevent_setwatermark(partner, EV_WRITE, 0, 0);
+  bufferevent_enable(bev, EV_READ);
 }
 
 static void
@@ -354,6 +354,7 @@ main(int argc, char **argv)
     const char *port;
     const char *host;
     const char *auth;
+    const char *nameserver;
   };
   struct options o;
   char opt;  
@@ -370,12 +371,13 @@ main(int argc, char **argv)
 
   memset(&o, 0, sizeof(o));
 
-  while ((opt = getopt(argc, argv, "h:p:a:vuqcs")) != -1) {
+  while ((opt = getopt(argc, argv, "h:p:adn:")) != -1) {
     switch (opt) {
-    case 'v': ++verbose; break;
+    case 'd': ++verbose; break;
     case 'h': o.host = optarg; break;
     case 'p': o.port = optarg; break;
     case 'a': o.auth = optarg; break;
+    case 'n': o.nameserver = optarg; break;
     default: fprintf(stderr, "Unknow option=%c\n", opt); break;      
     }
   }
