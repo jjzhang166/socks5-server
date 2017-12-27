@@ -154,7 +154,6 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     if (spec != NULL)
       spec->s_addr = sin.sin_addr.s_addr;
 
-    logger_info("%s->%s", domain, b4);
   }
 
   /* then, AF_INET6 */
@@ -166,7 +165,6 @@ resolve_host(char *domain, int len, struct addrspec *spec)
 			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
       return -1;
 
-    logger_info("%s->%s", domain, b6);    
   }
   
   freeaddrinfo(res);
