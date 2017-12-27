@@ -1,12 +1,12 @@
 * socks5 proxy server
  FEATURE(s):
-  * handling https/http connections with polling api
+  * handling https/http connections with polling APIs
 
- TODO:
-  * add test
-  * getaddrinfo is blocking, so the best option is probably evutil_getaddrinfo()
+ TODO: 
+  * it's too slow to browse heavy websites
+  * getaddrinfo is blocking, so consider to resolve dns in non-blocking-mode
+  * use more secure authentication methods
 
- 
  DEPENDENCY:
   * Libevent(http://libevent.org)
 
