@@ -12,13 +12,15 @@ else
 endif
 export E Q
 
-uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
+uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
 
 PROGRAM=esocks
 
 CC=gcc
 
-OBJ=evsocks.o handlers.o slog.o
+OBJ=evsocks.o handlers.o slog.o async_dns.o
+
+SRC=handlers.c slog.c async_dns.c
 
 ifeq ($(uname_S),Linux)
  DEFINES=-DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
@@ -51,4 +53,4 @@ clean:
 
 .c.o:
 	$(E) "  CC      " $@
-	$(Q) ${CC} ${CFLAGS} ${DEFINES} -c $*.c
+	$(Q) $(CC) $(CFLAGS) $(DEFINES) -c $*.c
