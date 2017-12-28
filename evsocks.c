@@ -107,7 +107,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
     if (partner) {
 
       /* Flush leftover */
-      readcb_from_target(bev, ctx);
+      readcb_from_target(bev, partner);
       
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
@@ -117,6 +117,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, eventcb, NULL);
 	bufferevent_disable(partner, EV_READ);
+	bufferevent_enable(partner, EV_WRITE);	
       } else {
 	/* We have nothing left to say to the other 
          * side; close it! */
@@ -265,12 +266,12 @@ readcb(struct bufferevent *bev, void *ctx)
       destroycb(partner);
       return;
     }
-    /* don't forget drain buffer */
+    
+    /* Don't forget to drain buffer */
     evbuffer_drain(src, buflen);
-
     bufferevent_setcb(partner, readcb_from_target,
 		      NULL, eventcb, bev);
-    bufferevent_enable(partner, EV_READ);
+    bufferevent_enable(partner, EV_READ|EV_WRITE);
   }
 }
 
@@ -284,13 +285,18 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   src = bufferevent_get_input(bev);
   buflen  = evbuffer_get_length(src);
 
+  /* partner is a client. */
+  /* bev is a target.   */
+  
   if (!partner) {
     logger_debug(verbose, "readcb_from_target drain");
     evbuffer_drain(src, buflen);
     return;
   }
+
+  /* Let's see payload for client. */
   dst = bufferevent_get_output(partner);
-  
+
   /* Send data to the other side */
   if (evbuffer_add_buffer(dst, src)<0) {
     destroycb(partner);
@@ -344,6 +350,7 @@ acceptcb(struct evconnlistener *listener,
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   bufferevent_setcb(src, socks_initcb, NULL, eventcb, dst);
+  
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
 
