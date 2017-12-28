@@ -26,10 +26,8 @@ all: $(PROGRAMS)
 
 test_hostname: test_hostname.o
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) -o $@  $(LIBS) $(SRC) test_hostname.o
-	@echo 'updated' `date` >> test-result.txt
-	@echo `./test_hostname > test-result.txt`
-	@echo '' >> test-result.txt
+	$(Q) $(CC) $(CFLAGS) -o $@ test_hostname.o $(LIBS) $(SRC)
+	@echo `./test_hostname`
 
 clean:
 	$(RM) $(PROGRAMS) *.o

@@ -4,7 +4,7 @@
 void
 announce(const char *name, ...)
 {
-  (void)fprintf(stderr, "%s\n", name, NULL);
+  (void)fprintf(stderr, "%s\n", name);
 }
 
 void announce_(int ok_or_fail, const char *msg, va_list ap)
