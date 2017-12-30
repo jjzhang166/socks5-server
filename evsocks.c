@@ -46,6 +46,7 @@ static void readcb_from_target(struct bufferevent *bev, void *ctx);
 static void authorize_cb(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void drained_writecb(struct bufferevent *bev, void *ctx);
+static void after_connectcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -165,12 +166,11 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     bufferevent_setcb(bev, readcb,
 		      writecb, eventcb, partner);
     bufferevent_enable(bev, EV_READ|EV_WRITE);    
-    return;
+  } else  {
+    /* This is not a right protocol; get this destroyed. */
+    destroycb(bev);
+    logger_err("wrong protocol=%d", reqbuf[0]);
   }
-  /* This is not a right protocol; get this destroyed. */
-  destroycb(bev);
-  logger_err("wrong protocol=%d", reqbuf[0]);
-  return;
 }
 
 static void
@@ -221,21 +221,18 @@ readcb(struct bufferevent *bev, void *ctx)
     
     if (spec == NULL) {
       /* spec cannot be NULL */
-      logger_info("destroy");
+      logger_info("spec is null and destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
       destroycb(bev);
       return;
     } else {
-      
-      bufferevent_enable(bev, EV_WRITE);
+      bufferevent_enable(bev, EV_WRITE);      
       status = SREAD;
 
      /* TODO: */
      /*    how about IPv6?? */
       if (spec->family == AF_INET)  {
-	/* get this client ready to write */
-	/* connects to a target and sets up next events */
 	struct sockaddr_in target;
 	target.sin_family = AF_INET;
 	target.sin_addr.s_addr = spec->s_addr;
@@ -253,26 +250,39 @@ readcb(struct bufferevent *bev, void *ctx)
 	}
 
 	free(spec);
-	
+
 	evbuffer_drain(src, buflen);
-	logger_debug(verbose, "socket_connect and drain=%ld", buflen);
-	return;
+	logger_debug(verbose, "socket_connect and drain=%ld", buflen);	
+	bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
+	bufferevent_enable(bev, EV_WRITE|EV_READ);
       }
     }
   }
+}
 
-  if (status == SREAD) {
-    if (bufferevent_write(partner, buffer, buflen)<0) {
-      destroycb(partner);
-      return;
-    }
-    
-    /* Don't forget to drain buffer */
-    evbuffer_drain(src, buflen);
-    bufferevent_setcb(partner, readcb_from_target,
-		      NULL, eventcb, bev);
-    bufferevent_enable(partner, EV_READ|EV_WRITE);
-  }
+static void
+after_connectcb(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *partner = ctx;
+  struct evbuffer *src;
+  size_t buflen;
+
+  src = bufferevent_get_input(bev);
+  buflen = evbuffer_get_length(src); 
+  
+  u8 buffer[buflen];
+
+  evbuffer_copyout(src, buffer, buflen);
+
+  logger_info("payload=%ld", buflen);
+  
+  bufferevent_write(partner, buffer, buflen);
+
+  /* Don't forget to drain buffer */
+  evbuffer_drain(src, buflen);
+  bufferevent_setcb(partner, readcb_from_target,
+		    NULL, eventcb, bev);
+  bufferevent_enable(partner, EV_READ|EV_WRITE);
 }
 
 static void
