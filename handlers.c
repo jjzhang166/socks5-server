@@ -40,12 +40,12 @@ handle_addrspec(u8 *buffer)
   u8  pb[2]; /* 2 bytes for port */
 
   spec = malloc(sizeof(struct addrspec));
-
+  
   if (spec == NULL) {
     logger_err("handle_addrspec.malloc");
     return NULL;
   }
-  
+
   switch (atype) {
   case IPV4:
     buflen = 8;
@@ -61,13 +61,13 @@ handle_addrspec(u8 *buffer)
   case IPV6:
     buflen = 20;    
     spec->family = AF_INET6;
-    memcpy(spec->ipv6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
-    if(!(evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b, sizeof(b)))) {
+    memcpy(spec->sin6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+    if(!(evutil_inet_ntop(AF_INET6, &(spec->sin6_addr), b, sizeof(b)))) {
       logger_err("inet_ntop(AF_INET6..");
       free(spec);
       return NULL;
     }
-    if (evutil_inet_pton(AF_INET6, b, spec->ipv6_addr)<0) {
+    if (evutil_inet_pton(AF_INET6, b, spec->sin6_addr)<0) {
       logger_err("inet_pton(AF_INET6..");
       free(spec);
       return NULL;
@@ -82,13 +82,13 @@ handle_addrspec(u8 *buffer)
     domlen = buffer[4];
     buflen = domlen+5;
 
-    spec->domain = calloc(domlen, sizeof(const char));
+    spec->domain = calloc(domlen, sizeof(u8));
     spec->family = AF_INET;
     memcpy(spec->domain, buffer+5, domlen);
-    
+
     if (resolve_host(spec->domain, domlen, spec)<0)
       return NULL;
-    
+ 
     free(spec->domain);
     break;
   default:
@@ -120,7 +120,7 @@ resolve_host(char *domain, int len, struct addrspec *spec)
   if (!strchr(domain, '.')) {
     return -1;
   }
-  
+
   if (getaddrinfo((char *) domain, NULL, &hints, &res)<0) {
     logger_err("getaddrinfo host not(%s) found", domain);
     return -1;
@@ -205,7 +205,7 @@ debug_addr(struct addrspec *spec)
     }
     break;
   case AF_INET6:
-    if (evutil_inet_ntop(AF_INET6, &(spec->ipv6_addr), b6, SOCKS_INET6_ADDRSTRLEN)) {
+    if (evutil_inet_ntop(AF_INET6, &(spec->sin6_addr), b6, SOCKS_INET6_ADDRSTRLEN)) {
       logger_info("ip6=%s:%d", b6, spec->port);
     }
     break;

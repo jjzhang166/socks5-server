@@ -89,9 +89,9 @@
 struct addrspec {
   short   family;
   char   *domain;
-  u8      ipv6_addr[16];
   u16     port;  
   u64     s_addr;
+  u8      sin6_addr[16];  
 };
 
 /* verbose for verbose log output */
