@@ -64,22 +64,21 @@ int test_resolvecb()
 
   struct evdns_base *dnsbase = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);
   assert(dnsbase);
-
-  for (i = 0; i < ARRAY_SIZE(names); i++) {    
-    if (resolve_name(dnsbase, names[i], "8.8.8.8", "8.8.4.4") == 1)
-      test_failed("resolve_name");
-    else
-      test_ok("resole_name");
+  
+  for (i = 0; i < ARRAY_SIZE(names);++i) {
+    struct dns_context *ctx;
+    ctx = malloc(sizeof(ctx));
+    assert(ctx);
+    resolve(dnsbase, ctx, names[i], "8.8.8.8", "8.8.4.4");
+    test_ok("%s=>%s", ctx->name, ctx->v4);
   }
-
-  evdns_base_free(dnsbase, 0);
-  event_base_free(base);
 }
 
 int
 main()
-{
+{  
   test_name();
   test_handle_addr();
   test_resolvecb();
+  event_base_dispatch(base);
 }

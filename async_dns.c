@@ -11,8 +11,8 @@
 #include "slog.h"
 #include "async_dns.h"
 
-int
-resolve_name(struct evdns_base *dnsbase, const char *name, const char *ns, ...)
+struct evdns_getaddrinfo_request* 
+resolve(struct evdns_base *dnsbase, struct dns_context *ctx, const char *name, const char *ns, ...)
 {
   va_list ap;
   int res;
@@ -27,57 +27,42 @@ resolve_name(struct evdns_base *dnsbase, const char *name, const char *ns, ...)
   
   struct evutil_addrinfo hints;
   struct evdns_getaddrinfo_request *req;
-  struct dns_context *ctx;
   
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
+  hints.ai_family = PF_UNSPEC;
   hints.ai_flags = EVUTIL_AI_CANONNAME;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_protocol = IPPROTO_TCP;
-  
-  if (!(ctx = malloc(sizeof(ctx))))
+  ctx->name = malloc(sizeof(name)+1);
+
+  if (ctx->name == NULL)
     logger_err("malloc");
   
-  ctx->index = dns_pending_requests;
-  
-  if (!(ctx->name = strdup(name)))
-    logger_err("malloc");    
-  
-  ++dns_pending_requests;
+  ctx->name = name;
 
-  req = evdns_getaddrinfo(dnsbase, name, NULL, &hints, resolvecb, ctx);
-  if (req == NULL)
-    return 1;
-  
-  return 0;
+  return evdns_getaddrinfo(dnsbase, name, NULL, &hints, resolvecb, ctx);
 }
 
 static void
-resolvecb(int errcode, struct evutil_addrinfo *addr, void *ctx)
+resolvecb(int errcode, struct evutil_addrinfo *ai, void *ptr)
 {
-  struct dns_context *dnsctx = ctx;
+  struct dns_context *ctx = ptr;
+  int i;
 
   if (errcode) {
-    logger_err("%s:%s", dnsctx->name, evutil_gai_strerror(errcode));
+    logger_err("%s:%s", ctx->name, evutil_gai_strerror(errcode));
   } else {
-    struct evutil_addrinfo *ai;
-    logger_info("%d. %s", dnsctx->index, dnsctx->name);
-    for (ai = addr; ai; ai->ai_next) {
+    logger_info("==> %s", ctx->name);
+    for (i=0; ai; ai = ai->ai_next, i++) {
       char buf[128];
-      const char *s = NULL;
-      if (ai->ai_family == AF_INET) {
+      if (ai->ai_family == PF_INET) {
 	struct sockaddr_in *sin = (struct sockaddr_in*)ai->ai_addr;
-	s = evutil_inet_ntop(AF_INET, &sin->sin_addr, buf, 128);
-	fprintf(stdout, " ----> %s\n", s);
+	evutil_inet_ntop(AF_INET, &(sin->sin_addr), buf, sizeof(buf));
       }
-      else if (ai->ai_family == AF_INET6) {
+      else if (ai->ai_family == PF_INET6) {
 	struct sockaddr_in6 *sin6 = (struct sockaddr_in6*)ai->ai_addr;
-	s = evutil_inet_ntop(AF_INET6, &sin6->sin6_addr, buf, 128);	
-	fprintf(stdout, " ----> %s\n", s);
+	evutil_inet_ntop(AF_INET6, &(sin6->sin6_addr), buf, sizeof(buf));
       }
     }
-    evutil_freeaddrinfo(addr);
   }
-  free(dnsctx->name);
-  free(dnsctx);
 }

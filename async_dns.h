@@ -13,17 +13,19 @@
 #include <event2/dns.h>
 #include <event2/dns_compat.h>
 
-/* ns is a nameserver. */
-/* Returns 0 on success and 1 on fail. */
-extern int resolve_name(struct evdns_base *dnsbase, const char *name, const char *ns, ...);
-
-static void resolvecb(int errcode, struct evutil_addrinfo *addr, void *ctx);
-
-static int dns_pending_requests;
+#include "internal.h"
 
 struct dns_context {
-  int index;
-  char *name;
+  const char *name;  
+  char         *v4;
+  char         *v6;
 };
+
+/* ns is a nameserver. */
+/* Returns 0 on success and 1 on fail. */
+struct evdns_getaddrinfo_request* resolve(struct evdns_base *dnsbase, struct dns_context *ctx,
+					  const char *name, const char *ns, ...);
+
+static void resolvecb(int errcode, struct evutil_addrinfo *addr, void *ctx);
 
 #endif
