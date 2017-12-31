@@ -221,15 +221,15 @@ readcb(struct bufferevent *bev, void *ctx)
     
     if (spec == NULL) {
       /* spec cannot be NULL */
-      logger_info("spec is null and destroy");
+      logger_info("destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
       destroycb(bev);
       return;
+      
     } else {
+      
       bufferevent_enable(bev, EV_WRITE);      
-      status = SREAD;
-
      /* TODO: */
      /*    how about IPv6?? */
       if (spec->family == AF_INET)  {
@@ -237,6 +237,8 @@ readcb(struct bufferevent *bev, void *ctx)
 	target.sin_family = AF_INET;
 	target.sin_addr.s_addr = spec->s_addr;
 	target.sin_port = htons(spec->port);
+	
+	free(spec);
 	
 	if (bufferevent_socket_connect(partner,
 				       (struct sockaddr*)&target, sizeof(target))<0){	
@@ -248,11 +250,9 @@ readcb(struct bufferevent *bev, void *ctx)
 	  destroycb(bev);
 	  return;
 	}
-
-	free(spec);
-
+	
 	evbuffer_drain(src, buflen);
-	logger_debug(verbose, "socket_connect and drain=%ld", buflen);	
+	
 	bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
 	bufferevent_enable(bev, EV_WRITE|EV_READ);
       }
@@ -274,8 +274,6 @@ after_connectcb(struct bufferevent *bev, void *ctx)
 
   evbuffer_copyout(src, buffer, buflen);
 
-  logger_info("payload=%ld", buflen);
-  
   bufferevent_write(partner, buffer, buflen);
 
   /* Don't forget to drain buffer */
@@ -297,7 +295,6 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
 
   /* partner is a client. */
   /* bev is a target.   */
-  
   if (!partner) {
     logger_debug(verbose, "readcb_from_target drain");
     evbuffer_drain(src, buflen);
