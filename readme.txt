@@ -3,8 +3,7 @@
   * handling https/http connections with polling APIs
 
  TODO: 
-  * it's too slow to browse heavy websites
-  * getaddrinfo is blocking, so consider to resolve dns in non-blocking-mode
+  * getaddrinfo is blocking, so consider to resolve domain names in non-blocking-mode
   * use more secure authentication methods
 
  DEPENDENCY:
