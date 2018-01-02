@@ -57,6 +57,7 @@ handle_addrspec(u8 *buffer)
     s_addr = htonl(ipv4);
     spec->s_addr = s_addr;
     spec->family = AF_INET;
+    spec->domain = NULL;
     break;
   case IPV6:
     buflen = 20;    
@@ -72,6 +73,7 @@ handle_addrspec(u8 *buffer)
       free(spec);
       return NULL;
     }
+    spec->domain = NULL;    
     break;
   case _DOMAINNAME:
     /* TODO:
@@ -88,8 +90,10 @@ handle_addrspec(u8 *buffer)
 
     if (resolve_host(spec->domain, domlen, spec)<0)
       return NULL;
- 
-    free(spec->domain);
+
+    /* Only now, stop freeing */
+    /* free(spec->domain); */
+    
     break;
   default:
     logger_err("handle_addrspec.switch Unknown atype");
@@ -125,7 +129,7 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     logger_err("getaddrinfo host not(%s) found", domain);
     return -1;
   }
-  
+
   for (i = 0, p = res; p != NULL; p = p->ai_next) {
     switch (p->ai_family) {
     case AF_INET:
