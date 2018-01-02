@@ -16,15 +16,15 @@
 #include "internal.h"
 
 struct dns_context {
-  const char *name;  
-  char         *v4;
-  char         *v6;
+  char                *name;  
+  struct socksaddr_in *sin;
+  struct sockaddr_in6 *sin6;
 };
 
 /* ns is a nameserver. */
 /* Returns 0 on success and 1 on fail. */
 struct evdns_getaddrinfo_request* resolve(struct evdns_base *dnsbase, struct dns_context *ctx,
-					  const char *name, const char *ns, ...);
+					  char *name, size_t nslen, const char **nameservers);
 
 static void resolvecb(int errcode, struct evutil_addrinfo *addr, void *ctx);
 
