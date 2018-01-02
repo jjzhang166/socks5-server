@@ -26,6 +26,7 @@
 #include <event2/listener.h>
 
 #include "internal.h"
+#include "async_dns.h"
 #include "slog.h"
 
 #define MAX_OUTPUT (512 * 1024)
@@ -33,6 +34,8 @@
 const char *auth = NULL;
 
 static struct event_base *base;
+
+static struct evdns_base *evdns_base;
 
 /* status holds a future event status */
 static int status;
@@ -50,6 +53,13 @@ static void after_connectcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
+/* TODO
+ *  call them in lieu of exit 
+ *
+ * typedef void (*event_fatal_cb)(int err);
+ * void event_set_fatal_callback(event_fatal_cb cb); 
+ *
+*/
 
 static void
 syntax(void)
@@ -58,7 +68,6 @@ syntax(void)
   printf("Options:\n");
   printf("  -p port\n");
   printf("  -h host\n");
-  printf("  -a USERNAME:PASSWORD\n");  
   printf("  -d debug\n");
   exit(EXIT_SUCCESS);
 }
@@ -117,8 +126,6 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 	 * side. */
 	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, eventcb, NULL);
-	bufferevent_disable(partner, EV_READ);
-	bufferevent_enable(partner, EV_WRITE);	
       } else {
 	/* We have nothing left to say to the other 
          * side; close it! */
@@ -143,11 +150,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   u8 reqbuf[buf_size];
 
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
-
-  if (auth) {
-    payload[1] = 2;
-  }
-  
+   
   if (reqbuf[0] == SOCKS_VERSION) {
     logger_debug(verbose, "getting a request");
     status = SINIT;
@@ -156,20 +159,22 @@ socks_initcb(struct bufferevent *bev, void *ctx)
       destroycb(bev);
       return;
     }
+
     if (auth) {
+      payload[1] = 2;
       logger_debug(verbose, "callback to auth_func");
       bufferevent_setcb(bev, authorize_cb,
 			NULL, eventcb, partner);
-      return;
+    } else {
+      evbuffer_drain(src, evsize);
+      bufferevent_setcb(bev, readcb,
+			writecb, eventcb, partner);
+      bufferevent_enable(bev, EV_READ|EV_WRITE);
     }
-    evbuffer_drain(src, evsize);
-    bufferevent_setcb(bev, readcb,
-		      writecb, eventcb, partner);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);    
   } else  {
     /* This is not a right protocol; get this destroyed. */
-    destroycb(bev);
     logger_err("wrong protocol=%d", reqbuf[0]);
+    destroycb(bev);
   }
 }
 
@@ -179,7 +184,8 @@ readcb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   struct evbuffer *src, *dst;
   static struct addrspec *spec;
-  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};  
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  const char *nameservers[] = {"8.8.8.8", "8.8.4.4"};
   size_t buflen;
 
   src = bufferevent_get_input(bev);
@@ -189,10 +195,10 @@ readcb(struct bufferevent *bev, void *ctx)
   
   evbuffer_copyout(src, buffer, buflen);
 
-  if (auth) {
-    /* authentication code  */
-    payload[1] = 2;
-  }
+  /* if (auth) { */
+  /*   /\* authentication code  *\/ */
+  /*   payload[1] = 2; */
+  /* } */
 
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buffer[0] == SOCKS_VERSION) {
@@ -207,7 +213,7 @@ readcb(struct bufferevent *bev, void *ctx)
       }
       break;
     case UDPASSOC:
-      logger_warn("udp partner(%d) is not supported", buffer[1]);
+      logger_warn("protocol(%d) is not supported", buffer[1]);
       payload[1] = NOT_SUPPORTED;
       spec = NULL;
       break;
@@ -216,7 +222,7 @@ readcb(struct bufferevent *bev, void *ctx)
       payload[1] = GENERAL_FAILURE;
       spec = NULL;      
     }
-    
+
     debug_addr(spec);
     
     if (spec == NULL) {
@@ -229,6 +235,18 @@ readcb(struct bufferevent *bev, void *ctx)
       
     } else {
       
+      if (spec->domain != NULL) {
+	struct dns_context *ctx;
+	ctx = malloc(sizeof(ctx));
+	if (ctx == NULL)
+	  logger_err("malloc");
+	/* Should set callbacks here  */
+	if (resolve(evdns_base, ctx, spec->domain, 2, nameservers) == NULL)
+	  logger_err("evdns error");
+	/* TODO */
+	/*   free domain in a deffered function */
+      }
+
       bufferevent_enable(bev, EV_WRITE);      
      /* TODO: */
      /*    how about IPv6?? */
@@ -241,7 +259,7 @@ readcb(struct bufferevent *bev, void *ctx)
 	free(spec);
 	
 	if (bufferevent_socket_connect(partner,
-				       (struct sockaddr*)&target, sizeof(target))<0){	
+				       (struct sockaddr*)&target, sizeof(target)) != 0) {	
 	  logger_err("failed to connect");
 	  payload[1] = HOST_UNREACHABLE;	
 	  if (bufferevent_write(bev, payload, 10)<0) {
@@ -250,9 +268,9 @@ readcb(struct bufferevent *bev, void *ctx)
 	  destroycb(bev);
 	  return;
 	}
-	
+
 	evbuffer_drain(src, buflen);
-	
+	/* Await partner's event */
 	bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
 	bufferevent_enable(bev, EV_WRITE|EV_READ);
       }
@@ -305,9 +323,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   dst = bufferevent_get_output(partner);
 
   /* Send data to the other side */
-  if (evbuffer_add_buffer(dst, src)<0) {
-    destroycb(partner);
-  }
+  evbuffer_add_buffer(dst, src);
 
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
     logger_debug(verbose, "exceeding MAX_OUTPUT %ld", evbuffer_get_length(dst));
@@ -351,13 +367,18 @@ acceptcb(struct evconnlistener *listener,
 	    struct sockaddr *a, int slen, void *p)
 {
   struct bufferevent *src, *dst;
+
+  /* BEV_OPT_CLOSE_ON_FREE 
+   *  close the underlying socket, free an underlying bufferevent
+   * BEV_OPT_DEFER_CALLBACKS 
+   *  Deffer callbacks
+ */
   src = bufferevent_socket_new(base, fd,
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-  /* fd should be -1 here since we have no fd whatsoever */
+  /* fd should be -1 here since we have no fd whatsoever */   
   dst = bufferevent_socket_new(base, -1, 
 			       BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
   bufferevent_setcb(src, socks_initcb, NULL, eventcb, dst);
-  
   bufferevent_enable(src, EV_READ|EV_WRITE);
 }
 
@@ -390,7 +411,7 @@ main(int argc, char **argv)
     case 'd': ++verbose; break;
     case 'h': o.host = optarg; break;
     case 'p': o.port = optarg; break;
-    case 'a': o.auth = optarg; break;
+      // case 'a': o.auth = optarg; break;
     case 'n': o.nameserver = optarg; break;
     default: fprintf(stderr, "Unknow option=%c\n", opt); break;      
     }
@@ -403,10 +424,11 @@ main(int argc, char **argv)
   if (!o.port) {
     syntax();
   }
-  if (o.auth) {
-    auth = calloc(strlen(o.auth), sizeof(char));
-    auth = o.auth;
-  }
+  
+  /* if (o.auth) { */
+  /*   auth = calloc(strlen(o.auth), sizeof(char)); */
+  /*   auth = o.auth; */
+  /* } */
 
   /* allocate space for sockaddr_in */
   memset(&listen_on_addr, 0, sizeof(listen_on_addr));
@@ -424,11 +446,14 @@ main(int argc, char **argv)
     socklen = sizeof(struct sockaddr_in);
   }
 
-  base = event_base_new();
+  base = event_base_new();  
   if (!base) {
     logger_errx(1, "event_base_new()");
   }
 
+  evdns_base = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);
+  assert(evdns_base);
+  
   listener = evconnlistener_new_bind(base, acceptcb, NULL,
 		     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
@@ -450,7 +475,7 @@ main(int argc, char **argv)
   
   event_base_dispatch(base);
   event_base_free(base);
-  exit(0);
+  return 0;
 }
 
 
@@ -534,25 +559,20 @@ authorize_cb(struct bufferevent *bev, void *ctx)
     /* send auth message */
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_initcb.bufferevent_write");
-      free(user);
-      free(passwd);
-      free(authbuf);
+      logger_warn("login failed");
       destroycb(bev);
       return;
-    }
+    }    
   } else {
-    free(user);
-    free(passwd);
-    free(authbuf);
+    logger_warn("login failed");
     destroycb(bev);
     return;
   }
-
   free(user);
   free(passwd);
   free(authbuf);  
   evbuffer_drain(src, buf_size);
   bufferevent_setcb(bev, readcb,
 		    writecb, eventcb, partner);
-  bufferevent_enable(bev, EV_READ|EV_WRITE);
+  bufferevent_enable(bev, EV_READ|EV_WRITE);  
 }
