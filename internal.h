@@ -101,8 +101,8 @@ struct addrspec * handle_addrspec(u8 * buffer);
 
 extern void debug_addr(struct addrspec *spec);
 
-u8 * cpystrn(u8 *dst, u8 *src, size_t s);
+extern u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
-int resolve_host(char *domain, int len, struct addrspec *spec);
+extern int resolve_host(char *domain, int len, struct addrspec *spec);
 
 #endif
