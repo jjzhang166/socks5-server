@@ -23,9 +23,6 @@ struct dns_context {
 
 /* ns is a nameserver. */
 /* Returns 0 on success and 1 on fail. */
-struct evdns_getaddrinfo_request* resolve(struct evdns_base *dnsbase, struct dns_context *ctx,
+void resolve(struct evdns_base *dnsbase, struct dns_context *ctx,
 					  char *name, size_t nslen, const char **nameservers);
-
-static void resolvecb(int errcode, struct evutil_addrinfo *addr, void *ctx);
-
 #endif
