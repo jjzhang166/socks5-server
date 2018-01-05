@@ -91,8 +91,7 @@ handle_addrspec(u8 *buffer)
     if (resolve_host(spec->domain, domlen, spec)<0)
       return NULL;
 
-    /* Only now, stop freeing */
-    /* free(spec->domain); */
+    free(spec->domain);
     
     break;
   default:
@@ -107,7 +106,7 @@ handle_addrspec(u8 *buffer)
 }
 
 int
-resolve_host(char *domain, int len, struct addrspec *spec)
+resolve_host(char *host, int len, struct addrspec *spec)
 {
   struct addrinfo hints, *res, *p;
   struct sockaddr_in   sin;
@@ -115,21 +114,25 @@ resolve_host(char *domain, int len, struct addrspec *spec)
   char b4[SOCKS_INET_ADDRSTRLEN];
   char b6[SOCKS_INET6_ADDRSTRLEN];
   int i;
-
+  
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
-  /* try to check domain.. */
-  if (!strchr(domain, '.')) {
+  /* try to check host.. */
+  if (strchr(host, '.') == NULL) {
+    logger_err("strange address");
     return -1;
   }
 
-  if (getaddrinfo((char *) domain, NULL, &hints, &res)<0) {
-    logger_err("getaddrinfo host not(%s) found", domain);
+  /* TODO
+   *   A new hope was found: https://linux.die.net/man/3/getaddrinfo_a
+   * Let's try to implement non-blocking lookup! */  
+  if (getaddrinfo((char*)host, NULL, &hints, &res)<0) {
+    logger_err("host not found");
     return -1;
   }
-
+  
   for (i = 0, p = res; p != NULL; p = p->ai_next) {
     switch (p->ai_family) {
     case AF_INET:
@@ -140,39 +143,53 @@ resolve_host(char *domain, int len, struct addrspec *spec)
     }
     i++;
   }
-  
+
   if (i == 0) { /* no results */
-    logger_err("host(%s) not found", domain);
-    return -1;
+    logger_err("host(%s) not found", host);
+    goto failed;
   }
   
   /* start with AF_INET */
   for (p = res; p != NULL; p = p->ai_next) {
-    if (p->ai_family != AF_INET)
+    
+    if (p->ai_family != AF_INET)      
       continue;
+    
     memcpy(&sin, p->ai_addr, p->ai_addrlen);
+    
     if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&(sin.sin_addr),
 			 b4, SOCKS_INET_ADDRSTRLEN) == NULL)
-      return -1;
-    
-    if (spec != NULL)
-      spec->s_addr = sin.sin_addr.s_addr;
+      goto failed;
 
+    /* Immediately break if address found */
+    spec->s_addr = sin.sin_addr.s_addr;
+    
+    break;
   }
 
   /* then, AF_INET6 */
   for (p = res; p != NULL; p = p->ai_next) {
     if (p->ai_family != AF_INET6)
-      continue;    
-    memcpy(&sin6, p->ai_addr, p->ai_addrlen);    
-    if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&(sin6.sin6_addr),
-			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
-      return -1;
+      continue;
+    
+    memcpy(&sin6, p->ai_addr, p->ai_addrlen);
 
+    if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&sin6.sin6_addr,
+			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
+      goto failed;
+
+    /* Immediately break if address found */
+    memcpy(spec->sin6_addr, sin6.sin6_addr.s6_addr, p->ai_addrlen);
+    break;
   }
-  
+
   freeaddrinfo(res);
   return 1;
+
+ failed:
+  logger_info("failed");
+  freeaddrinfo(res);
+  return -1;
 }
 
 u8 *

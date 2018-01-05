@@ -89,9 +89,9 @@
 struct addrspec {
   short   family;
   char   *domain;
-  u16     port;  
+  u8      sin6_addr[SOCKS_INET6_ADDRSTRLEN];
+  u16     port;
   u64     s_addr;
-  u8      sin6_addr[16];  
 };
 
 /* verbose for verbose log output */
@@ -103,6 +103,6 @@ extern void debug_addr(struct addrspec *spec);
 
 extern u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
-extern int resolve_host(char *domain, int len, struct addrspec *spec);
+extern int resolve_host(char *host, int len, struct addrspec *spec);
 
 #endif
