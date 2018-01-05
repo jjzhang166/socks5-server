@@ -53,14 +53,6 @@ static void after_connectcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
-/* TODO
- *  call them in lieu of exit 
- *
- * typedef void (*event_fatal_cb)(int err);
- * void event_set_fatal_callback(event_fatal_cb cb); 
- *
-*/
-
 static void
 syntax(void)
 {
@@ -152,7 +144,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   evsize = evbuffer_copyout(src, reqbuf, buf_size);
    
   if (reqbuf[0] == SOCKS_VERSION) {
-    logger_debug(verbose, "getting a request");
+    logger_debug(verbose, "connecting");
     status = SINIT;
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_initcb.bufferevent_write");
@@ -160,17 +152,11 @@ socks_initcb(struct bufferevent *bev, void *ctx)
       return;
     }
 
-    if (auth) {
-      payload[1] = 2;
-      logger_debug(verbose, "callback to auth_func");
-      bufferevent_setcb(bev, authorize_cb,
-			NULL, eventcb, partner);
-    } else {
-      evbuffer_drain(src, evsize);
-      bufferevent_setcb(bev, readcb,
-			writecb, eventcb, partner);
-      bufferevent_enable(bev, EV_READ|EV_WRITE);
-    }
+    /* Seems legit request */
+    evbuffer_drain(src, evsize);
+    bufferevent_setcb(bev, readcb, writecb, eventcb, partner);
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
+
   } else  {
     /* This is not a right protocol; get this destroyed. */
     logger_err("wrong protocol=%d", reqbuf[0]);
@@ -180,25 +166,24 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 static void
 readcb(struct bufferevent *bev, void *ctx)
-{
+{  
   struct bufferevent *partner = ctx;
   struct evbuffer *src, *dst;
+  
   static struct addrspec *spec;
+  /* struct dns_context *dnsctx; */
+  /* const char *nameservers[] = {"8.8.8.8", "8.8.4.4"}; */
+  
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  const char *nameservers[] = {"8.8.8.8", "8.8.4.4"};
-  size_t buflen;
 
+  size_t buflen;
+  
   src = bufferevent_get_input(bev);
   buflen = evbuffer_get_length(src);
   
   u8 buffer[buflen];
   
   evbuffer_copyout(src, buffer, buflen);
-
-  /* if (auth) { */
-  /*   /\* authentication code  *\/ */
-  /*   payload[1] = 2; */
-  /* } */
 
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buffer[0] == SOCKS_VERSION) {
@@ -208,7 +193,8 @@ readcb(struct bufferevent *bev, void *ctx)
     case CONNECT:
     case BIND:
       spec = handle_addrspec(buffer);
-      if (!spec) {
+      if (spec == NULL) {
+	logger_debug(verbose, "BIND and CONNECT and give us back NULL spec");
 	payload[1] = HOST_UNREACHABLE;
       }
       break;
@@ -220,64 +206,52 @@ readcb(struct bufferevent *bev, void *ctx)
     default:
       logger_err("unknown command %d", buffer[1]);
       payload[1] = GENERAL_FAILURE;
-      spec = NULL;      
+      spec = NULL;
     }
 
     debug_addr(spec);
-    
+
     if (spec == NULL) {
       /* spec cannot be NULL */
-      logger_info("destroy");
+      logger_info("spec is null and destroy");
       if (bufferevent_write(bev, payload, 10)<0)
 	logger_err("bufferevent_write");
       destroycb(bev);
       return;
       
     } else {
-      
-      if (spec->domain != NULL) {
-	struct dns_context *ctx;
-	ctx = malloc(sizeof(ctx));
-	if (ctx == NULL)
-	  logger_err("malloc");
-	/* Should set callbacks here  */
-	if (resolve(evdns_base, ctx, spec->domain, 2, nameservers) == NULL)
-	  logger_err("evdns error");
-	/* TODO */
-	/*   free domain in a deffered function */
-      }
 
       bufferevent_enable(bev, EV_WRITE);      
-     /* TODO: */
-     /*    how about IPv6?? */
+      /* TODO: */
+      /*    how about IPv6?? */
       if (spec->family == AF_INET)  {
-	struct sockaddr_in target;
-	target.sin_family = AF_INET;
-	target.sin_addr.s_addr = spec->s_addr;
-	target.sin_port = htons(spec->port);
-	
-	free(spec);
-	
-	if (bufferevent_socket_connect(partner,
-				       (struct sockaddr*)&target, sizeof(target)) != 0) {	
-	  logger_err("failed to connect");
-	  payload[1] = HOST_UNREACHABLE;	
-	  if (bufferevent_write(bev, payload, 10)<0) {
-	    logger_err("bufferevent_write");
-	  }
-	  destroycb(bev);
-	  return;
-	}
-
-	evbuffer_drain(src, buflen);
-	/* Await partner's event */
-	bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
-	bufferevent_enable(bev, EV_WRITE|EV_READ);
+  	struct sockaddr_in target;
+  	target.sin_family = AF_INET;
+  	target.sin_addr.s_addr = spec->s_addr;
+  	target.sin_port = htons(spec->port);
+  	
+  	free(spec);
+  	
+  	if (bufferevent_socket_connect(partner,
+  				       (struct sockaddr*)&target, sizeof(target)) != 0) {	
+  	  logger_err("failed to connect");
+  	  payload[1] = HOST_UNREACHABLE;	
+  	  if (bufferevent_write(bev, payload, 10)<0) {
+  	    logger_err("bufferevent_write");
+  	  }
+  	  destroycb(bev);
+  	  return;
+  	}
+  
+  	evbuffer_drain(src, buflen);
+  	/* Await partner's event */
+  	bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
+  	bufferevent_enable(bev, EV_WRITE|EV_READ);
       }
     }
   }
 }
-
+  
 static void
 after_connectcb(struct bufferevent *bev, void *ctx)
 {
@@ -446,19 +420,15 @@ main(int argc, char **argv)
     socklen = sizeof(struct sockaddr_in);
   }
 
-  base = event_base_new();  
-  if (!base) {
-    logger_errx(1, "event_base_new()");
-  }
-
-  evdns_base = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);
-  assert(evdns_base);
+  base = event_base_new();
+  
+  /* evdns_base = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);  */
   
   listener = evconnlistener_new_bind(base, acceptcb, NULL,
 		     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 				     -1, (struct sockaddr*)&listen_on_addr, socklen);
   if (!listener) {
-    logger_err("evconnlistener_new_bind()");
+    logger_err("bind");
     event_base_free(base);
     exit(EXIT_FAILURE);    
   }
