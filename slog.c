@@ -72,7 +72,7 @@ logger_info(const char *fmt, ...)
 void
 log_output(int serverity, const char *errstr, const char *fmt, va_list ap)
 {
-  char buf[1024];
+  char buf[512];
   size_t len;
 
   if (fmt != NULL)
@@ -85,7 +85,8 @@ log_output(int serverity, const char *errstr, const char *fmt, va_list ap)
     if (len < sizeof(buf) - 3) {
       evutil_snprintf(buf + len, sizeof(buf) - len, ": %s", errstr);      
     }
-  }  
+  }
+
   socks_log(serverity, buf);  
 }
 
