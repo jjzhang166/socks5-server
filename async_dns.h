@@ -16,13 +16,13 @@
 #include "internal.h"
 
 struct dns_context {
-  char                *name;  
-  struct socksaddr_in *sin;
-  struct sockaddr_in6 *sin6;
+  char       *name;
+  char        *sin;
+  char       *sin6;
 };
 
 /* ns is a nameserver. */
 /* Returns 0 on success and 1 on fail. */
 void resolve(struct evdns_base *dnsbase, struct dns_context *ctx,
-					  char *name, size_t nslen, const char **nameservers);
+	     size_t nslen, const char **nameservers);
 #endif
