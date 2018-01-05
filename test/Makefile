@@ -27,7 +27,6 @@ all: $(PROGRAMS)
 test_hostname: test_hostname.o
 	$(E) "  CC      " $@
 	$(Q) $(CC) $(CFLAGS) -o $@ test_hostname.o $(LIBS) $(SRC)
-	@echo `./test_hostname`
 
 clean:
 	$(RM) $(PROGRAMS) *.o

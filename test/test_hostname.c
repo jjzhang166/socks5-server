@@ -2,8 +2,10 @@
 #include "../internal.h"
 #include "../async_dns.h"
 #include "tiny_test.h"
-
+  
 static struct event_base *base;
+static struct evdns_base *dnsbase;
+
 
 struct regress_host {
   u8 *domain;
@@ -23,12 +25,13 @@ test_name()
   size_t i, hostlen = sizeof(hosts) / sizeof(hosts[0]);
   announce("test_name");
 
-  for (i =0; i < hostlen; i++)
-    if (resolve_host(hosts[i].domain, hosts[i].len, NULL) < 0)
+  for (i =0; i < hostlen; i++) {
+    struct addrspec spec;
+    if (resolve_host(hosts[i].domain, hosts[i].len, &spec) < 0)
 	test_failed("resolve_host=%s", hosts[i].domain);
     else
       test_ok("resolve_host=%s", hosts[i].domain);
-  
+  }
   return 1;
 }
 
@@ -66,40 +69,39 @@ int test_handle_addr()
 
 
 const char *nameservers[] = {
-  "8.8.8.8", "8.8.4.4", "127.0.0.1"
+  "8.8.4.4", "127.0.0.1",   "8.8.8.8"
 };
 
 /* names to be resolved */
-const char *names[] = {
-  "github.com", "google.com", "tools.ietf.org"
+char *names[] = {
+  "github.com", "tools.ietf.org", "posteo.de",
 };
 
-int test_resolvecb()
+void
+test_resolvecb()
 {
 
   size_t i, nslen = sizeof(nameservers) / sizeof(nameservers[0]);
   size_t namelen = sizeof(names) / sizeof(names[0]);
   int res;  
-
+  
   announce("test_resolvecb");
   
   base = event_base_new();
-  assert(base);
-
-  struct evdns_base *dnsbase = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE);
-  assert(dnsbase);
+  dnsbase = evdns_base_new(base, EVDNS_BASE_DISABLE_WHEN_INACTIVE); 
 
   for (i = 0; i < namelen; ++i) {
     struct dns_context *ctx;
     ctx = malloc(sizeof(ctx));
-    assert(ctx);
-    resolve(dnsbase, ctx, (char*)names[i], nslen, nameservers);
+    ctx->name = strdup(names[i]);
+    ctx->name = names[i];
+    resolve(dnsbase, ctx, nslen, nameservers);
   }
 }
 
 int
 main()
-{  
+{
   test_name();
   test_handle_addr();
   test_resolvecb();

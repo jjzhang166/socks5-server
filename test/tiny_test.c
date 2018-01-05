@@ -42,5 +42,6 @@ test_failed(const char *fmt, ...)
   va_start(ap, fmt);
   va_end(ap);
   
-  announce_(0, fmt, ap);	  
+  announce_(0, fmt, ap);
+  exit(1);
 }
