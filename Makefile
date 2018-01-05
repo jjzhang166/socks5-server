@@ -45,7 +45,7 @@ CFLAGS=-std=c99 \
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(DEFINES) -o $@ $(OBJ) $(LIBS)
+	$(Q) $(CC) $(DEFINES) $(OBJ) $(LIBS) -o $@
 
 clean:
 	$(E) "  CLEAN "
