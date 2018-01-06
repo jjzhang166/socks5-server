@@ -18,9 +18,9 @@ PROGRAM=esocks
 
 CC=gcc
 
-OBJ=evsocks.o handlers.o slog.o async_dns.o
+OBJ=evs_server.o evs_handlers.o evs_log.o evs_dns.o
 
-SRC=handlers.c slog.c async_dns.c
+SRC=evs_handlers.c evs_log.c evs_dns.c
 
 ifeq ($(uname_S),Linux)
  DEFINES=-DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600

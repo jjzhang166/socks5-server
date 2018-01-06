@@ -16,7 +16,7 @@ PROGRAMS=test_hostname
 
 LIBS=-levent -levent_core
 
-SRC=../handlers.c ../async_dns.c ../slog.c tiny_test.c
+SRC=../evs_handlers.c ../evs_dns.c ../evs_log.c tiny_test.c
 
 CFLAGS=-std=c99 \
         -D_DEFAULT_SOURCE \
@@ -24,9 +24,14 @@ CFLAGS=-std=c99 \
 
 all: $(PROGRAMS)
 
+
 test_hostname: test_hostname.o
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) -o $@ test_hostname.o $(LIBS) $(SRC)
+	$(Q) $(CC) $(CFLAGS) test_hostname.o $(SRC) $(LIBS) -o $@ 
+
+#test_hostname: test_hostname.o
+#       $(E) "  CC      " $@
+#       $(Q) $(CC) $(CFLAGS) test_hostname.o $(LIBS) -o $@
 
 clean:
-	$(RM) $(PROGRAMS) *.o
+	$(Q) $(RM) $(PROGRAMS) *.o

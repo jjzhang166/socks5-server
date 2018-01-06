@@ -1,4 +1,4 @@
-#include "../internal.h"
+#include "../evs_internal.h"
 #include "tiny_test.h"
 
 void

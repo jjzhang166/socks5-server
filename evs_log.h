@@ -2,8 +2,8 @@
  * slog.h
 */
 
-#ifndef SLOG_H
-#define SLOG_H
+#ifndef EVS_LOG_H
+#define EVS_LOG_H
 
 #include <stdarg.h>
 

@@ -13,7 +13,7 @@
 #include <event2/dns.h>
 #include <event2/dns_compat.h>
 
-#include "internal.h"
+#include "evs_internal.h"
 
 struct dns_context {
   char       *name;

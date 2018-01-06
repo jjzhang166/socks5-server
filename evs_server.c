@@ -25,9 +25,8 @@
 
 #include <event2/listener.h>
 
-#include "internal.h"
-#include "async_dns.h"
-#include "slog.h"
+#include "evs_internal.h"
+#include "evs_log.h"
 
 #define MAX_OUTPUT (512 * 1024)
 
@@ -56,11 +55,17 @@ static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 static void
 syntax(void)
 {
-  printf("Usage: esocks [options...]\n");
+  printf("USAGE: esocks [-p port] [options...]\n");
+  printf("\n");
   printf("Options:\n");
+  printf("  -c client mode\n");
+  printf("  -s server mode\n");
+  printf("  -k password\n");
+  printf("  -d daemon\n");
   printf("  -p port\n");
   printf("  -h host\n");
-  printf("  -d debug\n");
+  printf("  -d debug mode\n");
+  printf("\n");  
   exit(EXIT_SUCCESS);
 }
 

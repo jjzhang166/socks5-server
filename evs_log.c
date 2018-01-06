@@ -11,7 +11,7 @@
 
 #include <event2/util.h>
 
-#include "slog.h"
+#include "evs_log.h"
 
 static void socks_log(int serverity, const char *msg);
 

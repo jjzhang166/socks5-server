@@ -7,9 +7,9 @@
  *
  */
 
-#include "internal.h"
-#include "slog.h"
-#include "async_dns.h"
+#include "evs_internal.h"
+#include "evs_log.h"
+#include "evs_dns.h"
 
 static void resolvecb(int errcode, struct evutil_addrinfo *ai, void *ptr);
 

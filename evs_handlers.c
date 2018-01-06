@@ -22,8 +22,8 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 
-#include "internal.h"
-#include "slog.h"
+#include "evs_internal.h"
+#include "evs_log.h"
 
 
 struct addrspec *

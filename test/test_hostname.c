@@ -1,11 +1,9 @@
-
-#include "../internal.h"
-#include "../async_dns.h"
+#include "../evs_internal.h"
+#include "../evs_dns.h"
 #include "tiny_test.h"
   
 static struct event_base *base;
 static struct evdns_base *dnsbase;
-
 
 struct regress_host {
   u8 *domain;
