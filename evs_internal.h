@@ -95,7 +95,7 @@ struct addrspec {
 };
 
 /* verbose for verbose log output */
-static int verbose;
+static int verbose_flag;
 
 struct addrspec * handle_addrspec(u8 * buffer);
 
