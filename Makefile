@@ -18,7 +18,7 @@ PROGRAM=esocks
 
 CC=gcc
 
-OBJ=evs_server.o evs_handlers.o evs_log.o evs_dns.o
+OBJ=evs_handlers.o evs_log.o evs_dns.o evs_server.o 
 
 SRC=evs_handlers.c evs_log.c evs_dns.c
 
@@ -30,6 +30,10 @@ ifeq ($(uname_S),FreeBSD)
 endif
 ifeq ($(uname_S),Darwin)
  DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_DARWIN_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
+endif
+
+ifeq ($(DEBUG), 1)
+	DE = -DDEBUG=1
 endif
 
 LIBS=-levent -levent_core
@@ -53,4 +57,4 @@ clean:
 
 .c.o:
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) $(DEFINES) -c $*.c
+	$(Q) $(CC) $(CFLAGS) $(DEFINES) $(DE) -c $*.c

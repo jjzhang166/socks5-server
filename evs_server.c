@@ -16,15 +16,15 @@
 #include <winsock2.h>
 #include <ws2tcip.h>
 #else
-
-#include <getopt.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #endif
 
-#include <signal.h>
 #include <sys/stat.h>
+#include <getopt.h>
+#include <signal.h>
+
 
 #include <event2/listener.h>
 
@@ -37,6 +37,9 @@
 static int yes_this_is_local;
 
 const char *auth = NULL;
+
+/* verbose for verbose log output */
+static int verbose_flag;
 
 static struct event_base *base;
 
@@ -54,7 +57,8 @@ static void readcb_from_target(struct bufferevent *bev, void *ctx);
 static void authorize_cb(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void drained_writecb(struct bufferevent *bev, void *ctx);
-static void after_connectcb(struct bufferevent *bev, void *ctx);
+static void local_readcb(struct bufferevent *bev, void *ctx);
+static void remote_writecb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -70,7 +74,7 @@ syntax(void)
   printf(" -k --password\n");
   printf(" -v --verbose\n");
   printf("\n");
-  exit(EXIT_SUCCESS);
+  exit(1);
 }
 
 static void
@@ -100,7 +104,7 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
 
   if (evbuffer_get_length(evb) == 0) {
     bufferevent_free(bev);
-    logger_debug(verbose_flag, "close_on_finished_writecb freed");    
+    logger_debug(DEBUG, "close_on_finished_writecb freed");    
   }
 }
 
@@ -109,7 +113,10 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 {  
 
   struct bufferevent *partner = ctx;
-  
+
+  if (what & (BEV_EVENT_CONNECTED))
+    logger_debug(DEBUG, "connected");
+
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
     
     if (what & BEV_EVENT_ERROR)
@@ -127,13 +134,12 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 	 * side. */
 	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, eventcb, NULL);
-      } else {
+      } else
 	/* We have nothing left to say to the other 
          * side; close it! */
 	bufferevent_free(partner);
-      }
     }
-    logger_debug(verbose_flag, "freed");
+    logger_debug(DEBUG, "freed");
     bufferevent_free(bev);
   }
 }
@@ -144,16 +150,23 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
   size_t buf_size = evbuffer_get_length(src);
-  ev_ssize_t evsize;
-
-  /* its' important to send out thses two bytes */
+  // ev_ssize_t evsize;
+  int i;
+  /* its' important to send out thses two bytes */  
   u8 payload[2] = {5, 0};
-  u8 reqbuf[buf_size];
+  
+  u8 version[0];  
+  /* read minimum buffer to get version */
+  evbuffer_copyout(src, version, 1);
 
-  evsize = evbuffer_copyout(src, reqbuf, buf_size);
-   
-  if (reqbuf[0] == SOCKS_VERSION) {
-    logger_debug(verbose_flag, "connecting");
+  // u8 reqbuf[buf_size];
+  // evsize = evbuffer_copyout(src, reqbuf, buf_size);
+
+  /* TODO: */
+  /*   Consider where and when data should be encrypted/decrypted */
+  
+  if (version[0] == SOCKS_VERSION) {
+    logger_debug(DEBUG, "connecting");
     status = SINIT;
     if (bufferevent_write(bev, payload, 2)<0) {
       logger_err("socks_initcb.bufferevent_write");
@@ -161,14 +174,23 @@ socks_initcb(struct bufferevent *bev, void *ctx)
       return;
     }
 
-    /* Seems legit request */
-    evbuffer_drain(src, evsize);
-    bufferevent_setcb(bev, readcb, writecb, eventcb, partner);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    if (yes_this_is_local)
+      {	
+	/* Cut the socks header that is usually 5 0 0 1... */
+	evbuffer_drain(src, buf_size);
+	bufferevent_setcb(bev, readcb, writecb, eventcb, partner);
+	bufferevent_enable(bev, EV_READ|EV_WRITE);
+	logger_debug(DEBUG, "bufsize=%ld", buf_size);
+      }
+    else
+      {
+	bufferevent_setcb(bev, NULL, remote_writecb, eventcb, partner);
+	bufferevent_enable(bev, EV_READ|EV_WRITE);
+      }
 
   } else  {
     /* This is not a right protocol; get this destroyed. */
-    logger_err("wrong protocol=%d", reqbuf[0]);
+    logger_err("wrong protocol=%d", version[0]);
     destroycb(bev);
   }
 }
@@ -191,7 +213,7 @@ readcb(struct bufferevent *bev, void *ctx)
   u8 buffer[buflen];
   
   evbuffer_copyout(src, buffer, buflen);
-
+  
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buffer[0] == SOCKS_VERSION)
     {
@@ -201,7 +223,7 @@ readcb(struct bufferevent *bev, void *ctx)
       case BIND:
 	spec = handle_addrspec(buffer);
 	if (spec == NULL) {
-	  logger_debug(verbose_flag, "BIND and CONNECT and give us back NULL spec");
+	  logger_debug(DEBUG, "BIND and CONNECT and give us back NULL spec");
 	  payload[1] = HOST_UNREACHABLE;
 	}
 	break;
@@ -232,12 +254,11 @@ readcb(struct bufferevent *bev, void *ctx)
 	{
 	  if (yes_this_is_local)
 	    {
-	      logger_info("sending to server ...");
-	      /* Await partner's event */
-	      bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
+	      /* Await partner's event and go to local_readcb*/ 
+	      bufferevent_setcb(bev, local_readcb, NULL, eventcb, partner);
 	      bufferevent_enable(bev, EV_WRITE|EV_READ);
 	    }
-	  else if (!yes_this_is_local)
+	  else if (!yes_this_is_local) /* Handle events in remote server*/
 	    {
 	      bufferevent_enable(bev, EV_WRITE);      
 	      /* TODO: */
@@ -252,8 +273,7 @@ readcb(struct bufferevent *bev, void *ctx)
   	
 		if (bufferevent_socket_connect(partner,
 					       (struct sockaddr*)&target, sizeof(target)) != 0)
-		  {
-	    
+		  {	    
 		    logger_err("failed to connect");
 		    payload[1] = HOST_UNREACHABLE;	
 		    if (bufferevent_write(bev, payload, 10)<0) {
@@ -265,16 +285,64 @@ readcb(struct bufferevent *bev, void *ctx)
   
 		evbuffer_drain(src, buflen);
 		/* Await partner's event */
-		bufferevent_setcb(bev, after_connectcb, NULL, eventcb, partner);
+		bufferevent_setcb(bev, local_readcb, NULL, eventcb, partner);
 		bufferevent_enable(bev, EV_WRITE|EV_READ);
 	      }
 	    }
 	}
     }
 }
-  
+
 static void
-after_connectcb(struct bufferevent *bev, void *ctx)
+remote_writecb(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *partner = ctx;
+  struct evbuffer *src = bufferevent_get_input(bev);
+  size_t buf_size = evbuffer_get_length(src);
+  int res = 0;
+  char buf[128];
+  char v4[4];
+  char v6[16];
+  u8 reqbuf[buf_size];
+
+  evbuffer_copyout(src, reqbuf, buf_size);
+
+  switch(reqbuf[3]) {
+  case IPV4:
+    
+    memcpy(v4, reqbuf+4, sizeof(v4));
+
+    if (evutil_inet_ntop(AF_INET, v4, buf, SOCKS_INET_ADDRSTRLEN) == NULL)
+      
+      logger_errx(1, "invalid v4 address");
+
+    
+    logger_info("seems legit v4=%s", buf);
+    
+    break;
+  case IPV6:
+    
+    memcpy(v6, reqbuf+4, sizeof(v6));
+
+    if (evutil_inet_ntop(AF_INET6, v6, buf, SOCKS_INET6_ADDRSTRLEN) == NULL)
+      
+      logger_errx(1, "invalid v6 address");
+    
+    logger_info("seems legit v6=%s", buf);
+    
+    break;
+  case _DOMAINNAME:
+    
+    logger_debug(DEBUG, "domain");
+    
+    break;
+  }
+  
+  logger_errx(0, "res=%d", res);
+}
+
+static void
+local_readcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src;
@@ -286,7 +354,9 @@ after_connectcb(struct bufferevent *bev, void *ctx)
   u8 buffer[buflen];
 
   evbuffer_copyout(src, buffer, buflen);
-
+  
+  logger_info("sending to server ...");
+  
   bufferevent_write(partner, buffer, buflen);
 
   /* Don't forget to drain buffer */
@@ -309,7 +379,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   /* partner is a client. */
   /* bev is a target.   */
   if (!partner) {
-    logger_debug(verbose_flag, "readcb_from_target drain");
+    logger_debug(DEBUG, "readcb_from_target drain");
     evbuffer_drain(src, buflen);
     return;
   }
@@ -321,7 +391,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   evbuffer_add_buffer(dst, src);
 
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
-    logger_debug(verbose_flag, "exceeding MAX_OUTPUT %ld", evbuffer_get_length(dst));
+    logger_debug(DEBUG, "exceeding MAX_OUTPUT %ld", evbuffer_get_length(dst));
     bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);
     bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
  			     MAX_OUTPUT);
@@ -333,7 +403,7 @@ static void
 drained_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  logger_debug(verbose_flag, "EXCEEDING MAX_OUTPUT %ld",
+  logger_debug(DEBUG, "EXCEEDING MAX_OUTPUT %ld",
 	       evbuffer_get_length(bufferevent_get_output(bev)));  
   bufferevent_setcb(partner, readcb_from_target,
 		    NULL, eventcb, bev);
@@ -345,15 +415,22 @@ static void
 writecb(struct bufferevent *bev, void *ctx)
 {
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  
-  if (status == SINIT) {
-    if (bufferevent_write(bev, payload, 10)<0) {
-      destroycb(bev);
-      return;
-    }    
-    /* choke client */
-    bufferevent_disable(bev, EV_WRITE);    
-  }
+
+  if (yes_this_is_local)
+    {
+      if (status == SINIT) {
+	if (bufferevent_write(bev, payload, 10)<0) {
+	  destroycb(bev);
+	  return;
+	}    
+	/* choke client */
+	bufferevent_disable(bev, EV_WRITE);    
+      }
+    }
+  else
+    {
+      logger_debug(DEBUG, "remote writecb");
+    }
 }
 
 static void
@@ -377,7 +454,7 @@ acceptcb(struct evconnlistener *listener,
 				   BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
       if (bufferevent_socket_connect(partner, sa, sizeof(struct sockaddr_in))<0)
 	{
-	  logger_err("Obviously, forward server is down");
+	  logger_err("bufferevent_socket_connect");
 	}
     }
   else 
@@ -386,7 +463,7 @@ acceptcb(struct evconnlistener *listener,
 				 BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
 
   assert(bev && partner);
-  
+
   bufferevent_setcb(bev, socks_initcb, NULL, eventcb, partner);
   bufferevent_enable(bev, EV_READ|EV_WRITE);
 }
@@ -464,7 +541,7 @@ main(int c, char **v)
   base = event_base_new();
   
   if (yes_this_is_local)
-    /* Requested running in local mode
+    /* A server is requested running in local mode
        Server should connect to a remote server
     */
     {
@@ -523,7 +600,7 @@ main(int c, char **v)
 					 LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 					 -1, (struct sockaddr*)&listen_on_addr, socklen);
       logger_info("server is up and running %s:%s connecting %s:%s",
-		  o.server_addr, o.server_port, o.local_addr, o.local_port);      
+		  o.server_addr, o.server_port, o.local_addr, o.local_port);
     }
 
   if (!listener) {
@@ -531,10 +608,12 @@ main(int c, char **v)
     event_base_free(base);
     return 1;
   }
+
+  if (DEBUG == 1) logger_debug(DEBUG, "DEBUG MODE");
   
   signal_event = event_new(base, SIGINT,
 			   EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
-
+  
   if (!signal_event || event_add(signal_event, NULL))
     logger_errx(1, "Cannot add a signal_event");
   
@@ -546,7 +625,6 @@ main(int c, char **v)
   
   return 0;
 }
-
 
 static void
 authorize_cb(struct bufferevent *bev, void *ctx)
@@ -602,7 +680,7 @@ authorize_cb(struct bufferevent *bev, void *ctx)
     return;
   }
   
-  logger_debug(verbose_flag, "auth method=%d;userlen=%d;passwdlen=%d", method, userlen, passwdlen);
+  logger_debug(DEBUG, "auth method=%d;userlen=%d;passwdlen=%d", method, userlen, passwdlen);
   
   user = calloc(userlen, sizeof(char));
   passwd = calloc(passwdlen, sizeof(char));

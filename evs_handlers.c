@@ -35,7 +35,6 @@ handle_addrspec(u8 *buffer)
   u32 ipv4; /* 32 bits for IPv4 */
   u32 s_addr; /* 32 bits for IPv4 */
   u16 port; /* short for port  */
-  u8 atype = buffer[3];
   u8 ip4[4];
   u8  pb[2]; /* 2 bytes for port */
 
@@ -46,57 +45,78 @@ handle_addrspec(u8 *buffer)
     return NULL;
   }
 
-  switch (atype) {
+  switch (buffer[3]) {
   case IPV4:
+    
     buflen = 8;
-    memcpy(ip4, buffer+4, 4);
-    ipv4 =   (u32)ip4[0] << 24| /* build address manually ** sigh ** */
-             (u32)ip4[1] << 16|
-             (u32)ip4[2] << 8 |
-             (u32)ip4[3];
+    
+    memcpy(ip4, buffer+4, sizeof(ip4));
+    
+    ipv4 = (u32)ip4[0]<<24 | (u32)ip4[1]<<16 | (u32)ip4[2]<<8 | (u32)ip4[3];
+    
     s_addr = htonl(ipv4);
+    
     spec->s_addr = s_addr;
     spec->family = AF_INET;
     spec->domain = NULL;
+    
     break;
   case IPV6:
-    buflen = 20;    
+    
+    buflen = 20;
+    
     spec->family = AF_INET6;
+    
     memcpy(spec->sin6_addr, buffer+4, 16); /* 4 steps for jumping to 16 bytes address */
+    
     if(!(evutil_inet_ntop(AF_INET6, &(spec->sin6_addr), b, sizeof(b)))) {
+      
       logger_err("inet_ntop(AF_INET6..");
+      
       free(spec);
+      
       return NULL;
+      
     }
     if (evutil_inet_pton(AF_INET6, b, spec->sin6_addr)<0) {
+      
       logger_err("inet_pton(AF_INET6..");
+      
       free(spec);
+      
       return NULL;
+      
     }
-    spec->domain = NULL;    
+    
+    spec->domain = NULL;
+    
     break;
   case _DOMAINNAME:
     /* TODO:
      *  look up domains asynchronically
      *  most cases, getaddrinfo is stuck here
-     *  and eventually time-out will occur.
+     *  and eventually slow everything.
      */
     domlen = buffer[4];
     buflen = domlen+5;
 
-    spec->domain = calloc(domlen, sizeof(u8));
+    // spec->domain = calloc(domlen, sizeof(u8));
+    spec->domain = malloc(domlen+1);
     spec->family = AF_INET;
     memcpy(spec->domain, buffer+5, domlen);
 
-    if (resolve_host(spec->domain, domlen, spec)<0)
-      return NULL;
-
-    free(spec->domain);
+    // if (resolve_host(spec->domain, domlen, spec)<0)
+    //   return NULL;
+    // 
+    // free(spec->domain);
     
     break;
   default:
+    
     logger_err("handle_addrspec.switch Unknown atype");
+    
     free(spec);
+    
     return NULL;
   }
   memcpy(&pb, buffer+buflen, sizeof(pb));
@@ -106,24 +126,41 @@ handle_addrspec(u8 *buffer)
 }
 
 int
+parse_addr(char *addr)
+{
+  char buf[128];
+  int ires, i;
+
+  /* Check if this is a raw address? */
+  ires = inet_pton(AF_INET, addr, buf);
+
+  logger_debug(DEBUG, "%s", addr);
+  
+  if (ires == 1) return 1;
+
+  ires = inet_pton(AF_INET6, addr, buf);
+
+  logger_debug(DEBUG, "%s", addr);
+  
+  if (ires == 1) return 1;
+
+  if (ires<1) return -1;
+
+  return 1;
+}
+
+int
 resolve_host(char *host, int len, struct addrspec *spec)
 {
-  struct addrinfo hints, *res, *p;
-  struct sockaddr_in   sin;
-  struct sockaddr_in6 sin6;
-  char b4[SOCKS_INET_ADDRSTRLEN];
-  char b6[SOCKS_INET6_ADDRSTRLEN];
+  struct addrinfo       hints, *res, *p;
+  struct sockaddr_in                sin;
+  struct sockaddr_in6              sin6;
+  char buf[128];
   int i;
   
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-
-  /* try to check host.. */
-  if (strchr(host, '.') == NULL) {
-    logger_err("strange address");
-    return -1;
-  }
 
   /* TODO
    *   A new hope was found: https://linux.die.net/man/3/getaddrinfo_a
@@ -158,7 +195,7 @@ resolve_host(char *host, int len, struct addrspec *spec)
     memcpy(&sin, p->ai_addr, p->ai_addrlen);
     
     if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&(sin.sin_addr),
-			 b4, SOCKS_INET_ADDRSTRLEN) == NULL)
+			 buf, SOCKS_INET_ADDRSTRLEN) == NULL)
       goto failed;
 
     /* Immediately break if address found */
@@ -175,7 +212,7 @@ resolve_host(char *host, int len, struct addrspec *spec)
     memcpy(&sin6, p->ai_addr, p->ai_addrlen);
 
     if (evutil_inet_ntop(AF_INET6, (struct sockaddr*)&sin6.sin6_addr,
-			 b6, SOCKS_INET6_ADDRSTRLEN) == NULL)
+			 buf, SOCKS_INET6_ADDRSTRLEN) == NULL)
       goto failed;
 
     /* Immediately break if address found */

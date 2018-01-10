@@ -11,14 +11,46 @@ struct regress_host {
   int len;
 };
 
+
+char *raw_ipv4s[] = {
+  "172.217.27.78", "89.1460.133234"
+};
+
+char *raw_ipv6s[] = {
+  "2404:6800:4004:807::200e", "2404:6800:4004:807"
+};
+
+void
+test_parse_addr(void)
+{
+  int res;
+
+  announce("test_parse_addr");  
+  res = parse_addr(raw_ipv4s[0]);
+  assert(res == 1);
+
+  /* Should be failed */
+  res = parse_addr(raw_ipv4s[1]);
+  assert(res == -1);
+  
+  res = parse_addr(raw_ipv6s[0]);
+  assert(res == 1);
+
+    /* Should be failed */
+  res = parse_addr(raw_ipv6s[1]);
+  assert(res == -1);
+  
+  test_ok("test_parse_addr");
+}
+
 static struct regress_host hosts[] = {
   { "google.com", {1, 187}, 10 },
   { "tools.ietf.org" , {1, 187}, 14 },
   { "monkey.org", {1, 187}, 10 }
 };
 
-int
-test_name()
+void
+test_name(void)
 {
   size_t i, hostlen = sizeof(hosts) / sizeof(hosts[0]);
   announce("test_name");
@@ -30,9 +62,7 @@ test_name()
     else
       test_ok("resolve_host=%s", hosts[i].domain);
   }
-  return 1;
 }
-
 
 struct regress_bytes_data {
   const char *name;
@@ -50,7 +80,8 @@ struct regress_bytes_data test_data[] = {
     { 5, 0, 0, 3, 15, 119, 119, 119, 46, 119, 97, 110, 103, 97, 102, 117, 46, 110, 101, 116 }}
 };
 
-int test_handle_addr()
+void
+test_handle_addr(void)
 {  
 
   size_t i, datalen = sizeof(test_data) / sizeof(test_data[0]);
@@ -67,7 +98,7 @@ int test_handle_addr()
 
 
 const char *nameservers[] = {
-  "8.8.4.4", "127.0.0.1",   "8.8.8.8"
+  "8.8.4.4", "127.0.0.1",   "10.39.8.4"
 };
 
 /* names to be resolved */
@@ -76,9 +107,9 @@ char *names[] = {
 };
 
 void
-test_resolvecb()
+test_resolvecb(void)
 {
-
+  
   size_t i, nslen = sizeof(nameservers) / sizeof(nameservers[0]);
   size_t namelen = sizeof(names) / sizeof(names[0]);
   int res;  
@@ -100,6 +131,7 @@ test_resolvecb()
 int
 main()
 {
+  test_parse_addr();
   test_name();
   test_handle_addr();
   test_resolvecb();

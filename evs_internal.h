@@ -28,6 +28,10 @@
 #define u16 ev_uint16_t
 #define u8   ev_uint8_t
 
+/* easy debug mode */
+#ifndef  DEBUG
+#define  DEBUG 0
+#endif
 
 /* socks version  */
 #define SOCKS_VERSION 5
@@ -94,9 +98,6 @@ struct addrspec {
   u64     s_addr;
 };
 
-/* verbose for verbose log output */
-static int verbose_flag;
-
 struct addrspec * handle_addrspec(u8 * buffer);
 
 extern void debug_addr(struct addrspec *spec);
@@ -105,4 +106,5 @@ extern u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
 extern int resolve_host(char *host, int len, struct addrspec *spec);
 
+extern int parse_addr(char *addr);
 #endif
