@@ -12,44 +12,44 @@ else
 endif
 export E Q
 
-uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
+# uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
 
-PROGRAM=esocks
+PROGRAM = esocks
 
-CC=gcc
+CC = gcc
 
-OBJ=evs_handlers.o evs_log.o evs_dns.o evs_server.o 
+OBJ = evs_handlers.o evs_log.o evs_dns.o evs_server.o 
 
-SRC=evs_handlers.c evs_log.c evs_dns.c
+SRC = evs_handlers.c evs_log.c evs_dns.c
+# 
+# ifeq ($(uname_S),Linux)
+#  DEFINES =
+# endif
+# ifeq ($(uname_S),FreeBSD)
+#  DEFINES =
+# endif
+# ifeq ($(uname_S),Darwin)
+#  DEFINES =
+# endif
 
-ifeq ($(uname_S),Linux)
- DEFINES=-DAUTOCONF -DPOSIX -DUSG -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
-endif
-ifeq ($(uname_S),FreeBSD)
- DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_FREEBSD_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
-endif
-ifeq ($(uname_S),Darwin)
- DEFINES=-DAUTOCONF -DPOSIX -DSYSV -D_DARWIN_C_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE -D_XOPEN_SOURCE=600
-endif
-
-ifeq ($(DEBUG), 1)
+ifeq ($(DEBUG), yes)
 	DE = -DDEBUG=1
 endif
 
-LIBS=-levent -levent_core
+LIBS = -levent -levent_core
 
-CFLAGS=-std=c99 \
-        -D_DEFAULT_SOURCE \
-        -W \
-        -Wstrict-prototypes \
-        -Wmissing-prototypes \
-        -Wno-sign-compare \
-        -Wno-unused-parameter \
-	-O3
+CFLAGS = -std=c99 \
+         -D_DEFAULT_SOURCE \
+         -W \
+         -Wstrict-prototypes \
+         -Wmissing-prototypes \
+         -Wno-sign-compare \
+         -Wno-unused-parameter \
+	 -O3
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(DEFINES) $(OBJ) $(LIBS) -o $@
+	$(Q) $(CC) $(OBJ) $(LIBS) -o $@
 
 clean:
 	$(E) "  CLEAN "
