@@ -106,5 +106,4 @@ extern u8 * cpystrn(u8 *dst, u8 *src, size_t s);
 
 extern int resolve_host(char *host, int len, struct addrspec *spec);
 
-extern int parse_addr(char *addr);
 #endif

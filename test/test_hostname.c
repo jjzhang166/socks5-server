@@ -1,7 +1,9 @@
 #include "../evs_internal.h"
 #include "../evs_dns.h"
 #include "tiny_test.h"
-  
+
+/* Watch out - this is a work in progress. */
+
 static struct event_base *base;
 static struct evdns_base *dnsbase;
 
