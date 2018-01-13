@@ -20,7 +20,12 @@ REMOTE_PORT = 4001
 LOCAL_ADDR = "127.0.0.1"
 LOCAL_PORT = 4000
 PASSWORD = "this-is-a-password"
-TARGET_ADDR = "http://google.com"
+
+addrs = [
+    "http://google.com",
+    # "https://google.com",
+    # "https://ipv6.google.com"
+]
 
 
 # Curl return code:
@@ -55,7 +60,7 @@ def call_cmd(cmd):
                 i += 1
             except IndexError:
                 break
-        raise Exception(ERR_CODE.keys()[i-1])
+        raise Exception(ERR_CODE.keys()[i-2])
 
 
 def start_servers():
@@ -83,26 +88,29 @@ def start_servers():
     return proc1, proc2
 
 
-def test_response():
-    curl = """curl --socks5 {addr}:{port} {tg} -L -vvczl""".format(
-        addr=LOCAL_ADDR, port=LOCAL_PORT, tg=TARGET_ADDR)
+def test_response(target):
+    curl = """curl --socks5 {addr}:{port} {tg} -L -vv""".format(
+        addr=LOCAL_ADDR, port=LOCAL_PORT, tg=target)
     proc3 = mp.Process(target=call_cmd, args=(curl,))
     proc3.start()    
     assert proc3.is_alive()
-    
+
 
 if __name__ == "__main__":
+
     p1, p2 = start_servers()
-    test_response()
+    [test_response(x) for x in addrs]
 
     # Wait for process completion
-    time.sleep(4.)
+    time.sleep(.4)
 
     p1.terminate()
     p2.terminate()
 
     print("remote",p1.pid)
     print("local",p2.pid)
+    
     assert not p1.is_alive()
     assert not p2.is_alive()
+    
     print("stopped!")
