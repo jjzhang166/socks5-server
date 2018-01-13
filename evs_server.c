@@ -1,4 +1,6 @@
 /* 
+ * Watch out - this is a work in progress!
+ *
  * server.c
  *
  * Use of this source code is governed by a
@@ -191,12 +193,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
       {	
 	/* Cut the socks header that is usually 5 0 0 1... */
 	evbuffer_drain(src, buf_size);
-	
 	// bufferevent_setcb(bev, readcb, writecb, eventcb, partner);
 	bufferevent_setcb(bev, local_readcb_, local_writecb, eventcb, partner);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);	
-	logger_debug(DEBUG, "bufsize=%ld", buf_size);
-
       }
     else
       { /* Handling events in remote server */
@@ -231,70 +230,7 @@ local_readcb_(struct bufferevent *bev, void *ctx)
   
   evbuffer_copyout(src, buffer, buflen);
   
-  /* Check if version is correct and status is equal to INIT */
-  if (status == SINIT && buffer[0] == SOCKS_VERSION)
-    {
-      switch(buffer[1]) {
-	  /* parse socks header */
-	  switch (buffer[1]) {
-	  case CONNECT:
-	  case BIND:	    
-	    bufferevent_write(partner, buffer, buflen);
-	    break;
-	  case UDPASSOC:
-	    logger_warn("udp associate");
-	    break;
-	  default:
-	    logger_warn("unkonw cmd=%d", buffer[1]);
-	    destroycb(bev);
-	    return;
-	  }
-	}
-    }
-  bufferevent_write(bev, payload, 10);
-  logger_info("send");
-}
-
-
-static void
-local_writecb(struct bufferevent *bev, void *ctx)
-{
-  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  
-  if (status == SINIT) {
-	
-    if (bufferevent_write(bev, payload, 10)<0) {
-	  
-      destroycb(bev);
-      
-      return;
-    }
-    
-    /* choke client */
-    // bufferevent_disable(bev, EV_WRITE);
-	
-  }
-}
-
-
-static void
-readcb(struct bufferevent *bev, void *ctx)
-{  
-  struct bufferevent *partner = ctx;
-  struct evbuffer *src, *dst;
-  
-  static struct addrspec *spec;
-  
-  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-
-  size_t buflen;
-  
-  src = bufferevent_get_input(bev);
-  buflen = evbuffer_get_length(src);
-  
-  u8 buffer[buflen];
-  
-  evbuffer_copyout(src, buffer, buflen);
+  logger_info("payload=%ld", buflen);
   
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buffer[0] == SOCKS_VERSION)
@@ -303,39 +239,37 @@ readcb(struct bufferevent *bev, void *ctx)
       switch (buffer[1]) {
       case CONNECT:
       case BIND:
-	spec = handle_addrspec(buffer);
-	if (spec == NULL) {
-	  logger_debug(DEBUG, "BIND and CONNECT and give us back NULL spec");
-	  payload[1] = HOST_UNREACHABLE;
-	}
+	logger_info("payload=%ld", buflen);
+	bufferevent_enable(bev, EV_WRITE|EV_READ);
+	// bufferevent_write(partner, buffer, buflen);
 	break;
       case UDPASSOC:
-	logger_warn("protocol(%d) is not supported", buffer[1]);
-	payload[1] = NOT_SUPPORTED;
-	spec = NULL;
+	logger_warn("udp associate");
 	break;
       default:
-	logger_err("unknown command %d", buffer[1]);
-	payload[1] = GENERAL_FAILURE;
-	spec = NULL;
-      }
-
-      debug_addr(spec);
-
-      if (spec == NULL) {
-	/* spec cannot be NULL */
-	logger_info("spec is null and destroy");
-	if (bufferevent_write(bev, payload, 10)<0)
-	  logger_err("bufferevent_write");
+	logger_warn("unkonw cmd=%d", buffer[1]);
 	destroycb(bev);
 	return;
-      
-      } else {
-	/* Await partner's event and go to local_readcb*/ 
-	bufferevent_setcb(bev, local_readcb, NULL, eventcb, partner);
-	bufferevent_enable(bev, EV_WRITE|EV_READ);
       }
     }
+}
+
+static void
+local_writecb(struct bufferevent *bev, void *ctx)
+{
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  
+  if (status == SINIT) {
+
+    if (bufferevent_write(bev, payload, 10)<0) {	  
+      destroycb(bev);      
+      return;
+    }
+
+    /* choke client */
+    bufferevent_disable(bev, EV_WRITE);
+    logger_info("send 10bytes");	
+  }
 }
 
 static void
@@ -349,6 +283,8 @@ remote_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
+
+  struct addrspec spec;
   
   struct sockaddr_in sin;
   struct sockaddr_in6 sin6;
@@ -371,7 +307,10 @@ remote_writecb(struct bufferevent *bev, void *ctx)
     logger_info("payload=%ld", buf_size);
     logger_errx(0, "already made a connection!");
   };
-  
+
+
+  logger_info("payload=%ld", buf_size);
+ 
   switch(reqbuf[0]) {
 
   case IPV4:
@@ -456,27 +395,28 @@ remote_writecb(struct bufferevent *bev, void *ctx)
     status = SCONNECTED;
     
     break;
-  // case _DOMAINNAME:
-  // 
-  //   domlen = reqbuf[4];
-  //   
-  //   buflen = domlen + 5;
-  // 
-  //   name = (char*)malloc(domlen+1);
-  // 
-  //   memcpy(name, reqbuf + 5, domlen);
-  //   
-  //   if (resolve_host(name, domlen, spec)<0)
-  //     {
-  // 	logger_err("failed to resolve addr");
-  // 	destroycb(bev);
-  // 	return;
-  //     }
-  // 
-  //   free(name);
-  //   
-  //   logger_debug(DEBUG, "domain=>%s", spec->domain);
-  //   break;
+  case _DOMAINNAME:
+   
+    domlen = reqbuf[4];
+     
+    buflen = domlen + 5;
+   
+    name = (char*)malloc(domlen+1);
+   
+    memcpy(name, reqbuf + 5, domlen);
+     
+    if (resolve_host(name, domlen, &spec)<0)
+      {
+   	logger_err("failed to resolve addr");
+   	destroycb(bev);
+   	return;
+      }
+
+    logger_debug(DEBUG, "domain=>%s", name);
+    
+    free(name);
+     
+    break;
   default:
     
     logger_debug(DEBUG, "unknown code(%d)", reqbuf[3]);
@@ -553,6 +493,67 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
     bufferevent_disable(partner, EV_READ);
     
   }
+}
+
+static void
+readcb(struct bufferevent *bev, void *ctx)
+{  
+  struct bufferevent *partner = ctx;
+  struct evbuffer *src, *dst;
+  
+  static struct addrspec *spec;
+  
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+
+  size_t buflen;
+  
+  src = bufferevent_get_input(bev);
+  buflen = evbuffer_get_length(src);
+  
+  u8 buffer[buflen];
+  
+  evbuffer_copyout(src, buffer, buflen);
+  
+  /* Check if version is correct and status is equal to INIT */
+  if (status == SINIT && buffer[0] == SOCKS_VERSION)
+    {
+      /* parse socks header */
+      switch (buffer[1]) {
+      case CONNECT:
+      case BIND:
+	spec = handle_addrspec(buffer);
+	if (spec == NULL) {
+	  logger_debug(DEBUG, "BIND and CONNECT and give us back NULL spec");
+	  payload[1] = HOST_UNREACHABLE;
+	}
+	break;
+      case UDPASSOC:
+	logger_warn("protocol(%d) is not supported", buffer[1]);
+	payload[1] = NOT_SUPPORTED;
+	spec = NULL;
+	break;
+      default:
+	logger_err("unknown command %d", buffer[1]);
+	payload[1] = GENERAL_FAILURE;
+	spec = NULL;
+      }
+
+      debug_addr(spec);
+
+      if (spec == NULL) {
+	/* spec cannot be NULL */
+	logger_info("spec is null and destroy");
+	if (bufferevent_write(bev, payload, 10)<0)
+	  logger_err("bufferevent_write");
+	destroycb(bev);
+	return;
+      
+      } else {
+	/* Await partner's event and go to local_readcb*/ 
+	bufferevent_setcb(bev, local_readcb, NULL, eventcb, partner);
+	bufferevent_enable(bev, EV_WRITE|EV_READ);
+      }
+    }
 }
 
 static void
