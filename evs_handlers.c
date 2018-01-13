@@ -25,7 +25,6 @@
 #include "evs_internal.h"
 #include "evs_log.h"
 
-
 struct addrspec *
 handle_addrspec(u8 *buffer)
 {
@@ -78,7 +77,7 @@ handle_addrspec(u8 *buffer)
       return NULL;
       
     }
-    if (evutil_inet_pton(AF_INET6, b, spec->sin6_addr)<0) {
+    if (evutil_inet_pton(AF_INET6, b, spec->sin6_addr)<1) {
       
       logger_err("inet_pton(AF_INET6..");
       
@@ -126,30 +125,6 @@ handle_addrspec(u8 *buffer)
 }
 
 int
-parse_addr(char *addr)
-{
-  char buf[128];
-  int ires, i;
-
-  /* Check if this is a raw address? */
-  ires = inet_pton(AF_INET, addr, buf);
-
-  logger_debug(DEBUG, "%s", addr);
-  
-  if (ires == 1) return 1;
-
-  ires = inet_pton(AF_INET6, addr, buf);
-
-  logger_debug(DEBUG, "%s", addr);
-  
-  if (ires == 1) return 1;
-
-  if (ires<1) return -1;
-
-  return 1;
-}
-
-int
 resolve_host(char *host, int len, struct addrspec *spec)
 {
   struct addrinfo       hints, *res, *p;
@@ -164,10 +139,13 @@ resolve_host(char *host, int len, struct addrspec *spec)
 
   /* TODO
    *   A new hope was found: https://linux.die.net/man/3/getaddrinfo_a
-   * Let's try to implement non-blocking lookup! */  
+   * Let's try to implement non-blocking lookup! */
   if (getaddrinfo((char*)host, NULL, &hints, &res)<0) {
+    
     logger_err("host not found");
+    
     return -1;
+    
   }
   
   for (i = 0, p = res; p != NULL; p = p->ai_next) {
@@ -200,7 +178,7 @@ resolve_host(char *host, int len, struct addrspec *spec)
 
     /* Immediately break if address found */
     spec->s_addr = sin.sin_addr.s_addr;
-    
+
     break;
   }
 
