@@ -12,8 +12,6 @@ else
 endif
 export E Q
 
-# uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
-
 PROGRAM = esocks
 
 CC = gcc
@@ -21,7 +19,13 @@ CC = gcc
 OBJ = evs_handlers.o evs_log.o evs_dns.o evs_server.o 
 
 SRC = evs_handlers.c evs_log.c evs_dns.c
-# 
+
+uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
+
+ifeq ($(uname_S),Linux)
+DEFINES = -DGETADDRINFO_A
+endif
+
 # ifeq ($(uname_S),Linux)
 #  DEFINES =
 # endif
@@ -57,4 +61,4 @@ clean:
 
 .c.o:
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) $(DEFINES) $(DE) -c $*.c
+	$(Q) $(CC) $(DEFINES) $(CFLAGS) $(DEFINES) $(DE) -c $*.c
