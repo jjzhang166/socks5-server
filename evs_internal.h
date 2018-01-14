@@ -28,24 +28,16 @@
 #define u16 ev_uint16_t
 #define u8   ev_uint8_t
 
+
 /* easy debug mode */
 #ifndef  DEBUG
 #define  DEBUG 0
 #endif
 
+
 /* socks version  */
 #define SOCKS_VERSION 5
 
-/* 
- * socks auth password protocol
- *
- * X'00' NO AUTHENTICATION REQUIRED
- * X'01' GSSAPI
- * X'02' USERNAME/PASSWORD
- * X'03' to X'7F' IANA ASSIGNED
- * X'80' to X'FE' RESERVED FOR PRIVATE METHODS
- * X'FF' NO ACCEPTABLE METHODS
-*/
 
 #define SOCKSNOAUTH       0
 #define GSSAPI            1
@@ -53,30 +45,27 @@
 #define IANASSIGNED       3 /* curl requests this */
 
 
-/* socks commands */
-#define CONNECT  1
-#define BIND     2
-#define UDPASSOC 3
+typedef enum {
+  SUCCESSED = 0,
+  GENERAL_FAILURE,
+  METHOD_NOT_ALLOWED,
+  NETWORK_UNREACHABLE,
+  HOST_UNREACHABLE,
+  CONNECTION_REFUSED,
+  TTL_EXPIRED,
+  METHOD_NOT_SUPPORTED,
+  ADDRESS_TYPE_NOT_SUPPORTED,
+  UNASSIGNED  
+} socks_reply_e;  /* server replies */
 
- /* server replies */
-#define SUCCESSED                  0
-#define GENERAL_FAILURE            1
-#define NOT_ALLOWED                2
-#define NETWORK_UNREACHABLE        3
-#define HOST_UNREACHABLE           4
-#define REFUSED                    5
-#define TTL_EXPIRED                6
-#define NOT_SUPPORTED              7
-#define ADDRESS_TYPE_NOT_SUPPORTED 8
-#define UNASSIGNED                 9
 
  /* address type */
 #define IPV4        1
 #define IPV6        4
 #define _DOMAINNAME 3
 
- /* internal event flags */
-#define SINIT      9
+
+/* socks status flags */
 #define SREAD      1 /* reading data that a client send */
 #define SWRITE     2 /* writing data to target that a client send */
 #define SWAIT      3 /* waiting for a next event*/
@@ -85,6 +74,7 @@
 #define SFINISHED  6 /* client left */
 #define SCONNECTED 7
 #define SDNS       8
+#define SINIT      9
 
 #define SOCKS_INET_ADDRSTRLEN  (sizeof("255.255.255.255") - 1)
 #define SOCKS_INET6_ADDRSTRLEN \

@@ -25,6 +25,7 @@
 #include "evs_internal.h"
 #include "evs_log.h"
 
+
 struct addrspec *
 handle_addrspec(u8 *buffer)
 {
@@ -51,7 +52,8 @@ handle_addrspec(u8 *buffer)
     
     memcpy(ip4, buffer+4, sizeof(ip4));
     
-    ipv4 = (u32)ip4[0]<<24 | (u32)ip4[1]<<16 | (u32)ip4[2]<<8 | (u32)ip4[3];
+    ipv4 = (u32)ip4[0]<<24 | (u32)ip4[1]<<16 |
+      (u32)ip4[2]<<8 | (u32)ip4[3];
     
     s_addr = htonl(ipv4);
     
