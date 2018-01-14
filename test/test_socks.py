@@ -41,16 +41,19 @@ def create_srv_proc(cmd):
     proc = subprocess.Popen(
         shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE,
         env=ENVFLAGS, cwd="..")
-    out, err = proc.communicate()
+    
+    _, err = proc.communicate()
+    
     print(err)
+    
     return proc
 
 
-def call_cmd(cmd):
+def call_curl(cmd):
     proc = subprocess.Popen(
          shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE,
          env=ENVFLAGS)
-    out, err = proc.communicate()
+    _, err = proc.communicate()
     print(err)
     if proc.returncode in ERR_CODE.values():
         i = 0
@@ -61,6 +64,13 @@ def call_cmd(cmd):
             except IndexError:
                 break
         raise Exception(ERR_CODE.keys()[i-2])
+
+
+def call_cmd(cmd):
+    proc = subprocess.Popen(
+        shlex.split(cmd),
+        stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    return proc
 
 
 def start_servers():
@@ -91,26 +101,29 @@ def start_servers():
 def test_response(target):
     curl = """curl --socks5 {addr}:{port} {tg} -L -vv""".format(
         addr=LOCAL_ADDR, port=LOCAL_PORT, tg=target)
-    proc3 = mp.Process(target=call_cmd, args=(curl,))
+    proc3 = mp.Process(target=call_curl, args=(curl,))
     proc3.start()    
     assert proc3.is_alive()
 
 
-if __name__ == "__main__":
-
+def test():
     p1, p2 = start_servers()
     [test_response(x) for x in addrs]
 
     # Wait for process completion
     time.sleep(.4)
 
+    print("remote",p1.pid)
+    print("local",p2.pid)
+
     p1.terminate()
     p2.terminate()
 
-    print("remote",p1.pid)
-    print("local",p2.pid)
-    
     assert not p1.is_alive()
     assert not p2.is_alive()
     
     print("stopped!")
+
+    
+if __name__ == "__main__":
+    test()

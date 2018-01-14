@@ -18,38 +18,18 @@ char *raw_ipv4s[] = {
   "172.217.27.78", "89.1460.133234"
 };
 
+
 char *raw_ipv6s[] = {
   "2404:6800:4004:807::200e", "2404:6800:4004:807"
 };
 
-void
-test_parse_addr(void)
-{
-  int res;
-
-  announce("test_parse_addr");  
-  res = parse_addr(raw_ipv4s[0]);
-  assert(res == 1);
-
-  /* Should be failed */
-  res = parse_addr(raw_ipv4s[1]);
-  assert(res == -1);
-  
-  res = parse_addr(raw_ipv6s[0]);
-  assert(res == 1);
-
-    /* Should be failed */
-  res = parse_addr(raw_ipv6s[1]);
-  assert(res == -1);
-  
-  test_ok("test_parse_addr");
-}
 
 static struct regress_host hosts[] = {
   { "google.com", {1, 187}, 10 },
   { "tools.ietf.org" , {1, 187}, 14 },
   { "monkey.org", {1, 187}, 10 }
 };
+
 
 void
 test_name(void)
@@ -66,10 +46,12 @@ test_name(void)
   }
 }
 
+
 struct regress_bytes_data {
   const char *name;
   u8 buffer[256];
 };
+
 
 struct regress_bytes_data test_data[] = {
   { "google.com",
@@ -81,6 +63,7 @@ struct regress_bytes_data test_data[] = {
   { "www.wangafu.net",
     { 5, 0, 0, 3, 15, 119, 119, 119, 46, 119, 97, 110, 103, 97, 102, 117, 46, 110, 101, 116 }}
 };
+
 
 void
 test_handle_addr(void)
@@ -103,10 +86,12 @@ const char *nameservers[] = {
   "8.8.4.4", "127.0.0.1",   "10.39.8.4"
 };
 
+
 /* names to be resolved */
 char *names[] = {
   "github.com", "tools.ietf.org", "posteo.de",
 };
+
 
 void
 test_resolvecb(void)
@@ -133,7 +118,6 @@ test_resolvecb(void)
 int
 main()
 {
-  test_parse_addr();
   test_name();
   test_handle_addr();
   test_resolvecb();
