@@ -92,7 +92,7 @@ handle_addrspec(u8 *buffer)
     spec->domain = NULL;
     
     break;
-  case _DOMAINNAME:
+  case DOMAINN:
     /* TODO:
      *  look up domains asynchronically
      *  most cases, getaddrinfo is stuck here

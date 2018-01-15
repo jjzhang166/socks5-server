@@ -61,8 +61,8 @@ typedef enum {
 
  /* address type */
 #define IPV4        1
+#define DOMAINN     3
 #define IPV6        4
-#define _DOMAINNAME 3
 
 
 /* socks status flags */
