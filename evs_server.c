@@ -60,6 +60,7 @@ static void local_readcb(struct bufferevent *bev, void *ctx);
 static void remote_writecb(struct bufferevent *bev, void *ctx);
 static void remote_writecb_(struct bufferevent *bev, void *ctx);
 static void remote_readcb(struct bufferevent *bev, void *ctx);
+static void on_enable_writecb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -110,7 +111,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
     if (partner) {
 
       /* Flush leftover */
-      readcb_from_target(bev, partner);
+      readcb_from_target(bev, ctx);
       
       if (evbuffer_get_length(
 			      bufferevent_get_output(partner))) {
@@ -159,6 +160,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   evbuffer_copyout(src, buf, buf_size);
   
+  evbuffer_drain(src, buf_size);
+  
   /* TODO: */
   /*   Consider where and when data should be encrypted/decrypted */
 
@@ -180,11 +183,10 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 	
-	/* Cut the socks header that is usually 5 0 0 1... */
-	evbuffer_drain(src, buf_size);
 	bufferevent_setcb(bev, local_readcb, local_writecb,
 			  eventcb, partner);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);	
+	bufferevent_enable(bev, EV_READ|EV_WRITE);
+	
       }
     if (!yes_this_is_local)
       {
@@ -194,12 +196,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	/* Cut three bytes first
 	 * 5(socks version) 0(method) 0(reserved) 
 	 */
-	evbuffer_drain(src, 3);
-	
+
 	switch(buf[3]) {
 	case IPV4:
-	  
-	  evbuffer_drain(src, 1 + 4 + 2);
 	  
 	  /* Extract 4 bytes address */	  
 	  memcpy(v4, buf + 4, sizeof(v4));
@@ -239,8 +238,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  break;
 	case IPV6:
-	  
-	  evbuffer_drain(src, 1 + 16 + 2);
 
 	  memcpy(v6, buf + 4, sizeof(v6));
 
@@ -262,6 +259,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  
 	  break;	  
 	case DOMAINN:
+	  /* TODO */
 	  break;
 
 	default:
@@ -297,36 +295,20 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
+  evbuffer_drain(src, buf_size);
   
   logger_debug(DEBUG, "payload to targ=%ld", buf_size);
   
-  bufferevent_write(partner, buf, buf_size);
-
+  bufferevent_write(partner, buf, buf_size);  
+  
   bufferevent_setcb(partner, readcb_from_target,
-		    remote_writecb, eventcb, bev);
+		    NULL, eventcb, bev);
   bufferevent_enable(partner, EV_READ|EV_WRITE);
 }
 
 
 static void
 remote_writecb(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *partner = ctx;
-  struct evbuffer *src = bufferevent_get_input(bev);
-  size_t buf_size = evbuffer_get_length(src);
-
-  u8 buf[buf_size];
-  
-  evbuffer_copyout(src, buf, buf_size);
-
-  logger_debug(DEBUG, "payload from targ=%ld", buf_size);
-
-  bufferevent_write(bev, buf, buf_size);
-}
-
-
-static void
-remote_writecb_(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
@@ -495,9 +477,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
   
   u8 buf[buf_size];
 
-  evbuffer_copyout(src, buf, buf_size);
-  
-  evbuffer_drain(src, buf_size);
+  evbuffer_copyout(src, buf, buf_size);  
   
   socks_cmd_e cmd = buf[1];
 
@@ -508,7 +488,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
       switch (cmd) {
       case CONNECT:
       case BIND:
-	status = SWAIT;
+	// status = SWAIT;
 	break;
       case UDPASSOC:
 	logger_warn("udp associate");
@@ -517,17 +497,20 @@ local_readcb(struct bufferevent *bev, void *ctx)
 	logger_warn("unkonw cmd=%d", buf[1]);
 	destroycb(bev);
 	return;
-      }
-  
+      }  
     }
 
-  bufferevent_write(partner, buf, buf_size);
-  bufferevent_enable(bev, EV_WRITE);
+  evbuffer_drain(src, buf_size);
 
+  bufferevent_write(partner, buf, buf_size);
+
+  /* let bev write some data since it gets choked.. */
+  bufferevent_enable(bev, EV_WRITE);
+  
   /* set callbacks and wait for server response */  
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_WRITE|EV_READ);
-  
+
 }
 
 
@@ -542,6 +525,7 @@ local_writecb(struct bufferevent *bev, void *ctx)
 
   /* copy data into buf */
   evbuffer_copyout(src, buf, buf_size);
+  
   evbuffer_drain(src, buf_size);
   
   if (status == SINIT) {
@@ -557,15 +541,16 @@ local_writecb(struct bufferevent *bev, void *ctx)
     
     status = SWAIT;
     
-  } else if (status == SWAIT) {
-
-    logger_info("got bytes %ld", buf_size);
-
-    /* wirte data back to clients */    
-    bufferevent_write(bev, buf, buf_size);
-    bufferevent_disable(bev, EV_WRITE);
-
   }
+}
+
+
+static void
+on_enable_writecb(struct bufferevent *bev, void *ctx)
+{
+  struct bufferevent *partner = ctx;  
+  bufferevent_disable(bev, EV_WRITE);  
+  logger_debug(DEBUG, "on enalbe writecb");  
 }
 
 
@@ -592,17 +577,11 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
 
   evbuffer_copyout(src, buf, buflen);
   
-  bufferevent_enable(partner, EV_WRITE);
-    
   bufferevent_write(partner, buf, buflen);
-
-  logger_info("deliverd=%ld", buflen);
   
-  // /* Let's see payload for client. */
-  // dst = bufferevent_get_output(partner);
-  // 
-  // /* Send data to the other side */
-  // evbuffer_add_buffer(dst, src);
+  evbuffer_drain(src, buflen);
+  
+  logger_info("drained=%ld", buflen);
 
   /* forward  */
   dst = bufferevent_get_output(partner);
