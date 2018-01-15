@@ -11,8 +11,6 @@ import sys
 import shlex
 import subprocess
 import multiprocessing
-import signal
-
 from time import time, sleep
 
 ENVFLAGS = {'DEBUG': 'yes'}
