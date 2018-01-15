@@ -57,10 +57,7 @@ static void readcb_from_target(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void drained_writecb(struct bufferevent *bev, void *ctx);
 static void local_readcb(struct bufferevent *bev, void *ctx);
-static void remote_writecb(struct bufferevent *bev, void *ctx);
-static void remote_writecb_(struct bufferevent *bev, void *ctx);
 static void remote_readcb(struct bufferevent *bev, void *ctx);
-static void on_enable_writecb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 
@@ -101,7 +98,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
   struct bufferevent *partner = ctx;
 
   if (what & (BEV_EVENT_CONNECTED))
-    logger_debug(DEBUG, "connected");
+    logger_debug(DEBUG, "connected=%d", status);
 
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
     
@@ -142,8 +139,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   struct sockaddr_in sin;
   struct sockaddr_in6 sin6;
-  
-  int domlen;
+
+  int domlen, buflen;
   char *name;
 
   u8 abuf[128];
@@ -190,22 +187,18 @@ socks_initcb(struct bufferevent *bev, void *ctx)
       }
     if (!yes_this_is_local)
       {
-	/* choke til we have a connection confirmation */
+	/* choke til we have a connection */
 	bufferevent_disable(bev, EV_READ);
 
-	/* Cut three bytes first
-	 * 5(socks version) 0(method) 0(reserved) 
-	 */
-
 	switch(buf[3]) {
+	  
 	case IPV4:
 	  
 	  /* Extract 4 bytes address */	  
 	  memcpy(v4, buf + 4, sizeof(v4));
-	  logger_info("addr %d.%d.%d.%d",
-		      v4[0], v4[1], v4[2], v4[3]);
-	  
-	  if (evutil_inet_ntop(AF_INET, v4, abuf, SOCKS_INET_ADDRSTRLEN) == NULL)
+
+	  if (evutil_inet_ntop(AF_INET, v4, abuf,
+			       SOCKS_INET_ADDRSTRLEN) == NULL)
 	    {
 	      logger_err("invalid v4 address");
 	      destroycb(bev);
@@ -229,12 +222,19 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  sin.sin_port = htons(port);
 
 	  if (bufferevent_socket_connect(partner,
-					 (struct sockaddr*)&sin, sizeof(sin)) != 0)
+				    (struct sockaddr*)&sin, sizeof(sin)) != 0)
 	    {
 	      logger_err("v4: failed to connect");
 	      destroycb(bev);
 	      return;	      
 	    }
+
+	  /* wait for target's response and send it back
+	   *to client 
+	   */
+	  bufferevent_setcb(bev, remote_readcb,
+			    NULL, eventcb, partner);
+	  bufferevent_enable(bev, EV_READ|EV_WRITE);
 
 	  break;
 	case IPV6:
@@ -256,10 +256,31 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  destroycb(bev);
 	  return;	
 	}
-	  
+
+	/* wait for target's response and send it back
+	 *to client 
+	 */
+	bufferevent_setcb(bev, remote_readcb,
+			  NULL, eventcb, partner);
+	bufferevent_enable(bev, EV_READ|EV_WRITE);
+	
 	  break;	  
 	case DOMAINN:
-	  /* TODO */
+
+	  domlen = buf[4];
+	  
+	  buflen = domlen + 5;
+
+	  name = (char*)malloc(domlen+1);
+   
+	  memcpy(name, buf + 5, domlen);
+
+	  logger_debug(DEBUG, "domain=>%s", name);
+    
+	  free(name);
+	  
+	  /* We should take domains more carefully than ipv4 and ipv6 */
+	  
 	  break;
 
 	default:
@@ -268,12 +289,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 
-	/* wait for target's response and send it back
-	 *to client 
-	 */
-	bufferevent_setcb(bev, remote_readcb,
-			  NULL, eventcb, partner);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);
       }
     
   } else {
@@ -303,154 +318,6 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   
   bufferevent_setcb(partner, readcb_from_target,
 		    NULL, eventcb, bev);
-  bufferevent_enable(partner, EV_READ|EV_WRITE);
-}
-
-
-static void
-remote_writecb(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *partner = ctx;
-  struct evbuffer *src = bufferevent_get_input(bev);
-
-  // struct addrspec spec;
-  
-  struct sockaddr_in sin;
-  struct sockaddr_in6 sin6;
-  
-  size_t buf_size = evbuffer_get_length(src);
-  int res = 0;
-  int i;
-  int domlen, buflen;
-  char buf[128], v4[4], v6[16];  
-  char *name;
-  u8 reqbuf[buf_size];
-  u8 portbuf[2];
-  u16 port;
-  
-  evbuffer_copyout(src, reqbuf, buf_size);
-
-  if (status == SCONNECTED) {
-    logger_info("already made a connection!");
-  };
-
-  if (status != SCONNECTED) {
-    switch(reqbuf[0]) {
-
-    case IPV4:
-
-      evbuffer_drain(src, 10);
-    
-      memcpy(v4, reqbuf+1, sizeof(v4));   
-
-      if (evutil_inet_ntop(AF_INET, v4, buf, SOCKS_INET_ADDRSTRLEN) == NULL)
-	{
-	  logger_err("invalid v4 address");
-	  destroycb(bev);
-	  return;
-	}
-    
-      logger_debug(DEBUG, "seems legit v4=%s", buf);
-    
-      /* Extract 4 bytes address */
-      if (evutil_inet_pton(AF_INET, buf, &sin.sin_addr)<1)
-	{
-	  logger_err("failed to resolve addr");
-	  destroycb(bev);
-	  return;
-	}
-    
-      /* And extract 2 bytes port as well */
-      memcpy(portbuf, reqbuf+1+4, 2);
-      port = portbuf[0]<<8 | portbuf[1];
-
-      sin.sin_family = AF_INET;
-      sin.sin_port = htons(port);
-  
-      if (bufferevent_socket_connect(partner,
-		     (struct sockaddr*)&sin, sizeof(sin)) != 0)
-	{
-	  logger_err("v4: failed to connect");
-	  destroycb(bev);
-	  return;	
-	}
-  
-      status = SCONNECTED;
-  
-      break;
-    case IPV6:
-
-      evbuffer_drain(src, 1+16+2);
-
-      memcpy(v6, reqbuf+1, sizeof(v6));
-
-      if (evutil_inet_ntop(AF_INET6, v6, buf,
-			   SOCKS_INET6_ADDRSTRLEN) == NULL)
-	{
-	  logger_err( "invalid v6 address");
-	  destroycb(bev);
-	  return;
-	}
-
-      logger_debug(DEBUG, "seems legit v6=%s", buf);
-    
-      /* Extract 16 bytes address */
-      if (evutil_inet_pton(AF_INET6, buf, &sin6.sin6_addr)<1)
-	{
-	  logger_err("v6: failed to resolve addr");
-	  destroycb(bev);
-	  return;
-	}
-  
-      if (bufferevent_socket_connect(partner,
-			 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
-	{
-	  logger_err("failed to connect");
-	  destroycb(bev);
-	  return;	
-	}
-
-      /* And extract 2 bytes port as well */
-      memcpy(portbuf, reqbuf+1+16, 2);
-      port = portbuf[0]<<8 | portbuf[1];
-
-      sin6.sin6_family = AF_INET6;
-      sin6.sin6_port = htons(port);
-    
-      status = SCONNECTED;
-    
-      break;
-    case DOMAINN:
-   
-      domlen = reqbuf[4];
-     
-      buflen = domlen + 5;
-   
-      name = (char*)malloc(domlen+1);
-   
-      memcpy(name, reqbuf + 5, domlen);
-
-      /* TODO
-       * resolve hosts 
-       */
-      
-      logger_debug(DEBUG, "domain=>%s", name);
-    
-      free(name);
-     
-      break;
-      
-    default:
-    
-      logger_debug(DEBUG, "unknown code(%d)", reqbuf[3]);
-      destroycb(bev);
-      return;
-    }
-  }
-  
-  bufferevent_setcb(partner, readcb_from_target,
-		    remote_writecb, eventcb, bev);
-  
   bufferevent_enable(partner, EV_READ|EV_WRITE);
 }
 
@@ -485,7 +352,6 @@ local_readcb(struct bufferevent *bev, void *ctx)
       switch (cmd) {
       case CONNECT:
       case BIND:
-	// status = SWAIT;
 	break;
       case UDPASSOC:
 	logger_warn("udp associate");
@@ -498,16 +364,15 @@ local_readcb(struct bufferevent *bev, void *ctx)
     }
 
   evbuffer_drain(src, buf_size);
-
+  
   bufferevent_write(partner, buf, buf_size);
 
   /* let bev write some data since it gets choked.. */
   bufferevent_enable(bev, EV_WRITE);
-  
+
   /* set callbacks and wait for server response */  
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_WRITE|EV_READ);
-
 }
 
 
@@ -520,34 +385,16 @@ local_writecb(struct bufferevent *bev, void *ctx)
   u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
   u8 buf[buf_size];
 
-  /* copy data into buf */
   evbuffer_copyout(src, buf, buf_size);
-  
   evbuffer_drain(src, buf_size);
   
   if (status == SINIT) {
-
-    /* Send payload to clients */
-    if (bufferevent_write(bev, payload, 10)<0) {	  
-      destroycb(bev);      
-      return;
-    }
-  
+    bufferevent_write(bev, payload, 10);
     bufferevent_disable(bev, EV_WRITE);
-    logger_info("send 10 bytes");
-    
-    status = SWAIT;
-    
   }
-}
 
-
-static void
-on_enable_writecb(struct bufferevent *bev, void *ctx)
-{
-  struct bufferevent *partner = ctx;  
-  bufferevent_disable(bev, EV_WRITE);  
-  logger_debug(DEBUG, "on enalbe writecb");  
+  /* change status SINIT to whatever status */
+  status = SWAIT;
 }
 
 
@@ -556,29 +403,29 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   struct evbuffer *src, *dst;
-  size_t buflen;
+  size_t buf_size;
   
   src = bufferevent_get_input(bev);
 
-  buflen  = evbuffer_get_length(src);
-  u8 buf[buflen];
+  buf_size  = evbuffer_get_length(src);
+  u8 buf[buf_size];
   
   if (!partner) {
 
     logger_debug(DEBUG, "readcb_from_target drain");
     
-    evbuffer_drain(src, buflen);
-    
+    evbuffer_drain(src, buf_size);
+
     return;
   }
 
-  evbuffer_copyout(src, buf, buflen);
+  evbuffer_copyout(src, buf, buf_size);
   
-  bufferevent_write(partner, buf, buflen);
+  bufferevent_write(partner, buf, buf_size);
   
-  evbuffer_drain(src, buflen);
+  evbuffer_drain(src, buf_size);
   
-  logger_info("drained=%ld", buflen);
+  logger_info("drained=%ld", buf_size);
 
   /* forward  */
   dst = bufferevent_get_output(partner);
@@ -758,7 +605,6 @@ main(int c, char **v)
        Server should connect to a remote server
     */
     {
-
       if (evutil_parse_sockaddr_port(o.local_port,
 			   (struct sockaddr*)&listen_on_addr, &socklen)<0)
 	{
