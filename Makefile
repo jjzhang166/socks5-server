@@ -16,9 +16,9 @@ PROGRAM = esocks
 
 CC = gcc
 
-OBJ = evs_handlers.o evs_log.o evs_dns.o evs_server.o 
+OBJ = evs_log.o evs_dns.o evs_server.o
 
-SRC = evs_handlers.c evs_log.c evs_dns.c
+SRC = evs_log.c evs_dns.c
 
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo nah')
 

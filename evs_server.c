@@ -313,7 +313,7 @@ remote_writecb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
 
-  struct addrspec spec;
+  // struct addrspec spec;
   
   struct sockaddr_in sin;
   struct sockaddr_in6 sin6;
@@ -429,14 +429,11 @@ remote_writecb(struct bufferevent *bev, void *ctx)
       name = (char*)malloc(domlen+1);
    
       memcpy(name, reqbuf + 5, domlen);
-     
-      if (resolve_host(name, domlen, &spec)<0)
-	{
-	  logger_err("failed to resolve addr");
-	  destroycb(bev);
-	  return;
-	}
 
+      /* TODO
+       * resolve hosts 
+       */
+      
       logger_debug(DEBUG, "domain=>%s", name);
     
       free(name);
