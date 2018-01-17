@@ -18,10 +18,6 @@ CC = gcc
 
 OBJ =  evs_server.o evs_log.o
 
-ifeq ($(uname_S),Linux)
-DEFINES = -DGETADDRINFO_A
-endif
-
 ifeq ($(DEBUG), yes)
 	DE = -DDEBUG=1
 endif
@@ -35,19 +31,19 @@ CFLAGS = -std=c99 \
          -Wmissing-prototypes \
          -Wno-sign-compare \
          -Wno-unused-parameter \
-	 -O3
+	 -O3 \
+	 $(DE)
 
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
 	$(Q) $(CC) $(OBJ) $(LIBS) -o $@
 
+.c.o:
+	$(E) "  CC      " $@
+	$(Q) $(CC) $(CFLAGS) -c evs_server.c evs_log.c
 
 clean:
 	$(E) "  CLEAN "
 	$(Q) rm -f *.o $(PROGRAM)
 
-
-evs_server.o:
-	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) -c evs_server.c evs_log.c
