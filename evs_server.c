@@ -32,6 +32,7 @@
 
 #include "evs_internal.h"
 #include "evs_log.h"
+#include "evs_helper.h"
 
 #define MAX_OUTPUT (512 * 1024)
 
@@ -68,7 +69,7 @@ destroycb(struct bufferevent *bev)
   status = 0;
   
   logger_info("destroyed");
- 
+
   /* Unset all callbacks */
   bufferevent_free(bev);
   
@@ -85,8 +86,7 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
     
     bufferevent_free(bev);
     
-    logger_debug(DEBUG, "close_on_finished_writecb freed");
-    
+    logger_debug(DEBUG, "close_on_finished_writecb freed");   
   }
 }
 
@@ -140,9 +140,11 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   struct sockaddr_in sin;
   struct sockaddr_in6 sin6;
 
+  /* name lookup stuff */
+  socks_name_t t;
   int domlen, buflen;
-  char *name;
-
+  char name;  
+  
   u8 abuf[128];
   u8 buf[buf_size];
   u8 v4[4];
@@ -229,12 +231,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    }
 
 	  logger_info("* %s", abuf);
-	  /* wait for target's response and send it back
-	   *to client 
-	   */
-	  bufferevent_setcb(bev, remote_readcb,
-			    NULL, eventcb, partner);
-	  bufferevent_enable(bev, EV_READ|EV_WRITE);
 
 	  break;
 	case IPV6:
@@ -259,39 +255,61 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  destroycb(bev);
 	  return;
 	}
-
-	/* wait for target's response and send it back
-	 *to client 
-	 */
-	bufferevent_setcb(bev, remote_readcb,
-			  NULL, eventcb, partner);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);
 	
 	  break;	  
 	case DOMAINN:
 
-	  domlen = buf[4];
+	  domlen = (int) buf[4];
 	  
-	  buflen = domlen + 5;
+	  buflen = (int) domlen + 5;
 
-	  name = (char*)malloc(domlen+1);
-   
-	  memcpy(name, buf + 5, domlen);
+	  memset(&t, 0, sizeof(socks_name_t));
 
-	  logger_debug(DEBUG, "domain=>%s", name);
-    
-	  free(name);
+	  t.host = buf + 5;
+	  t.len = domlen + 1;
 	  
-	  /* We should take domains more carefully than ipv4 and ipv6 */
-	 
+	  if (resolve_host(&t) != 0) {
+	    logger_err("failed lookup");
+	    destroycb(bev);
+	    return;
+	  }
+       
+	  /* And extract 2 bytes port as well */
+	  memcpy(portbuf, buf + buflen, 2);
+	  port = portbuf[0]<<8 | portbuf[1];
+
+	  t.sin.sin_family = AF_INET;
+	  t.sin.sin_port = htons(port);
+
+	  if (bufferevent_socket_connect(partner,
+					 (struct sockaddr*)&t.sin, sizeof(t.sin)) != 0)
+	    {
+	      logger_err("connect: failed to connect");
+	      destroycb(bev);
+	      return;	      
+	    }
+
+	  if (evutil_inet_ntop(AF_INET,
+			       (struct sockaddr_in*)&t.sin.sin_addr, abuf, sizeof(abuf))
+	      == NULL)
+	    logger_err("failed to resolve host");
+
+	  logger_info("resolve_host => %s", abuf);
+
 	  break;
-
 	default:
 	  logger_err("unkown atype=%d", buf[3]);
 	  destroycb(bev);
 	  return;
 	}
 
+	/* wait for target's response and if any data back, send it back
+	 * to client 
+	 */
+	bufferevent_setcb(bev, remote_readcb,
+			  NULL, eventcb, partner);
+	bufferevent_enable(bev, EV_READ|EV_WRITE);
+	
       }
     
   } else {

@@ -29,7 +29,7 @@
 #define u8   ev_uint8_t
 
 
-/* easy debug mode */
+/* simple debug mode */
 #ifndef  DEBUG
 #define  DEBUG 0
 #endif
