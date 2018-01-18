@@ -266,8 +266,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  memset(&t, 0, sizeof(socks_name_t));
 
 	  t.host = buf + 5;
-	  t.len = domlen + 1;
-	  
+	  t.len = domlen;
+
 	  if (resolve_host(&t) != 0) {
 	    logger_err("failed lookup");
 	    destroycb(bev);
