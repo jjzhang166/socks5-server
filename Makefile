@@ -16,10 +16,10 @@ PROGRAM = esocks
 
 CC = gcc
 
-OBJ =  evs_server.o evs_log.o
+OBJ =  evs_server.o evs_log.o evs_helper.o
 
 ifeq ($(DEBUG), yes)
-	DE = -DDEBUG=1
+	DE = -DDEBUG=1 -g # debug and ready for gdb
 endif
 
 LIBS = -levent -levent_core
@@ -41,7 +41,7 @@ $(PROGRAM): $(OBJ)
 
 .c.o:
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) -c evs_server.c evs_log.c
+	$(Q) $(CC) $(CFLAGS) -c evs_server.c evs_log.c evs_helper.c
 
 clean:
 	$(E) "  CLEAN "
