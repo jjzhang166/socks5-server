@@ -141,7 +141,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   struct sockaddr_in6 sin6;
 
   /* name lookup stuff */
-  socks_name_t t;
+  socks_name_t n;
   int domlen, buflen;
   char name;  
   
@@ -151,20 +151,21 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   u8 v6[16];
   u8 portbuf[2];
   u16 port;
-  
-  int i;
-  
-  /* its' important to send out thses two bytes */  
+
+  /* payload for ok message to clients */
   u8 payload[2] = {5, 0};
 
+  /* Watch out where we drain the read buffer!! 
+     We cannout proceed next callback func til
+     have a connection.
+   */
   evbuffer_copyout(src, buf, buf_size);
-  
-  evbuffer_drain(src, buf_size);
-  
+
   /* TODO: */
   /*   Consider where and when data should be encrypted/decrypted */
 
   if (buf[0] == SOCKS_VERSION) {
+    
     
     logger_info("connecting");
 
@@ -172,34 +173,34 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
     if (yes_this_is_local)
       {
-    
+	
+        evbuffer_drain(src, buf_size);
+	
 	if (bufferevent_write(bev, payload, 2)<0) {
       
-	  logger_err("socks_initcb.bufferevent_write");
-      
+	  logger_err("bufferevent_write");      
 	  destroycb(bev);
- 
+
 	  return;
 	}
 	
 	bufferevent_setcb(bev, local_readcb, local_writecb,
 			  eventcb, partner);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);
-	
+	bufferevent_enable(bev, EV_READ|EV_WRITE);	
       }
 
     /* Basically what we do here is resolve hosts and wait 
      * til we have a connection.
-     */    
+     */
     if (!yes_this_is_local)
       {
-	/* choke til we have a connection */
+	/* choke to stop reading any data */
 	bufferevent_disable(bev, EV_READ);
 
 	switch(buf[3]) {
 	  
 	case IPV4:
-	  
+	  evbuffer_drain(src, buf_size);  
 	  /* Extract 4 bytes address */	  
 	  memcpy(v4, buf + 4, sizeof(v4));
 
@@ -240,7 +241,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  
 	  break;
 	case IPV6:
-
+	  evbuffer_drain(src, buf_size);
 	  memcpy(v6, buf + 4, sizeof(v6));
 
 	  /* Extract 16 bytes address */
@@ -268,37 +269,33 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  break;	  
 	case DOMAINN:
 
-	  domlen = (int) buf[4];
+	  domlen = (size_t) buf[4];
 	  
 	  buflen = (int) domlen + 5;
 
-	  memset(&t, 0, sizeof(socks_name_t));
+	  memset(&n, 0, sizeof(socks_name_t));
 
-	  t.host = buf + 5;
-	  t.len = domlen;
-	  t.bev = bev;
-	  
-	  // if (resolve_host(&t) != 0) {
-	  //   logger_err("failed lookup");
-	  //   destroycb(bev);
-	  //   return;
-	  // }
+	  n.host = buf + 5;
+	  n.len = domlen;
+	  n.bev = bev;
 
-	  status = SDNS;
+	  status = SWAIT;
 	  
-	  resolvecb(&t);
+	  resolvecb(&n);
 
 	  /* And extract 2 bytes port as well */
 	  memcpy(portbuf, buf + buflen, 2);
 	  port = portbuf[0]<<8 | portbuf[1];
 
-	  t.sin.sin_family = AF_INET;
-	  t.sin.sin_port = htons(port);
+	  n.sin.sin_family = AF_INET;
+	  n.sin.sin_port = htons(port);
 
 	  if (status == DNS_OK) {
 	    
+	    evbuffer_drain(src, buf_size);
+	    
 	    if (evutil_inet_ntop(AF_INET,
-		 (struct sockaddr_in*)&t.sin.sin_addr, abuf, sizeof(abuf))
+		 (struct sockaddr_in*)&n.sin.sin_addr, abuf, sizeof(abuf))
 		== NULL) {
 	      logger_err("failed to resolve host");
 	      destroycb(bev);
@@ -306,18 +303,18 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    }
 
 	    if (bufferevent_socket_connect(partner,
-			   (struct sockaddr*)&t.sin, sizeof(t.sin)) != 0)
+			   (struct sockaddr*)&n.sin, sizeof(n.sin)) != 0)
 	      {
 		logger_err("connect: failed to connect");
 		destroycb(bev);
-		return;	      
+		return;
 	      }
 
 	    logger_info("resolve_host => %s", abuf);
 
 	    status = SCONNECTED;
 	  }
-	  
+
 	  break;
 	default:
 	  logger_err("unkown atype=%d", buf[3]);
@@ -340,6 +337,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     /* Seems a wrong protocol; get this destroyed. */
     logger_err("wrong protocol=%d", buf[0]);
     destroycb(bev);
+    return;
   }
 }
 
@@ -347,15 +345,12 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 static void
 resolvecb(socks_name_t *s)
 {
-
   if (resolve_host(s) != 0) {
     status = 0;
-    logger_err("failed lookup");
     destroycb(s->bev);
     return;
-  }
-  
-  status = DNS_OK; 
+  }      
+  status = DNS_OK;
 }
 
 
@@ -374,8 +369,15 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   
   logger_debug(DEBUG, "payload to targ=%ld", buf_size);
   
-  bufferevent_write(partner, buf, buf_size);  
-  
+  if (bufferevent_write(partner, buf, buf_size) <0) {
+    
+    logger_err("bufferevent_write");      
+    destroycb(bev);
+    
+    return;
+  }
+
+  /* wait for target's response and send data back to a client */
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_READ|EV_WRITE);
 
@@ -393,15 +395,13 @@ static void
 local_readcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  struct evbuffer *src;
-  size_t buf_size;
-  
-  src = bufferevent_get_input(bev);
-  buf_size = evbuffer_get_length(src);
-  
+  struct evbuffer *src = bufferevent_get_input(bev);
+  size_t buf_size = evbuffer_get_length(src);
+
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
+  evbuffer_drain(src, buf_size);
   
   socks_cmd_e cmd = buf[1];
 
@@ -422,10 +422,14 @@ local_readcb(struct bufferevent *bev, void *ctx)
 	return;
       }  
     }
-
-  evbuffer_drain(src, buf_size);
   
-  bufferevent_write(partner, buf, buf_size);
+  if (bufferevent_write(partner, buf, buf_size) <0) {
+    
+    logger_err("bufferevent_write");      
+    destroycb(bev);
+
+    return;    
+  }
 
   /* let bev write some data since it gets choked.. */
   bufferevent_enable(bev, EV_WRITE);
@@ -451,14 +455,12 @@ local_writecb(struct bufferevent *bev, void *ctx)
   if (status == SINIT) {
     
     bufferevent_write(bev, payload, 10);
-    
     bufferevent_disable(bev, EV_WRITE);
     
   }
 
   /* change status SINIT to whatever status */
-  status = SWAIT;
-  
+  status = SWAIT;  
 }
 
 
@@ -477,20 +479,24 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   
   if (!partner) {
 
-    logger_debug(DEBUG, "readcb_from_target drain");
-    
+    logger_debug(DEBUG, "readcb_from_target drain");    
     evbuffer_drain(src, buf_size);
 
     return;
   }
 
   evbuffer_copyout(src, buf, buf_size);
-  
-  bufferevent_write(partner, buf, buf_size);
-  
   evbuffer_drain(src, buf_size);
   
   logger_debug(DEBUG, "drained=%ld", buf_size);
+  
+  if (bufferevent_write(partner, buf, buf_size) < 0) {
+      
+    logger_err("bufferevent_write");      
+    destroycb(bev);
+
+    return;    
+  }
 
   /* forward  */
   dst = bufferevent_get_output(partner);
@@ -500,12 +506,10 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
     logger_debug(DEBUG, "exceeding MAX_OUTPUT %ld",
 		 evbuffer_get_length(dst));
     
-    bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);
-    
+    bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);    
     bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
  			     MAX_OUTPUT);
     bufferevent_disable(partner, EV_READ);
-    
   }
 }
 
@@ -545,9 +549,10 @@ acceptcb(struct evconnlistener *listener,
       if (bufferevent_socket_connect(partner,
 				     sa, sizeof(struct sockaddr_in))<0)
 	{
-	  logger_err("bufferevent_socket_connect");
+	  logger_err("cannot connect to the server");
 	}
     }
+
   else
     
     /* fd should be -1 here since we have no fd whatsoever */    
