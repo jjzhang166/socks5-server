@@ -75,6 +75,7 @@ typedef enum {
 #define SCONNECTED 7
 #define SDNS       8
 #define SINIT      9
+#define DNS_OK    10
 
 #define SOCKS_INET_ADDRSTRLEN  (sizeof("255.255.255.255") - 1)
 #define SOCKS_INET6_ADDRSTRLEN \
