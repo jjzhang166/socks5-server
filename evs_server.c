@@ -61,7 +61,7 @@ static void local_readcb(struct bufferevent *bev, void *ctx);
 static void remote_readcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
-
+static void resolvecb(socks_name_t *);
 
 static void
 destroycb(struct bufferevent *bev)
@@ -187,7 +187,10 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	bufferevent_enable(bev, EV_READ|EV_WRITE);
 	
       }
-    
+
+    /* Basically what we do here is resolve hosts and wait 
+     * til we have a connection.
+     */    
     if (!yes_this_is_local)
       {
 	/* choke til we have a connection */
@@ -208,7 +211,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;
 	    }
 	  
-	  if (evutil_inet_pton(AF_INET, abuf, &sin.sin_addr)<1)
+	  if (evutil_inet_pton(AF_INET, abuf, &sin.sin_addr) < 1)
 	    {
 	      logger_err("failed to resolve addr");
 	      destroycb(bev);
@@ -222,6 +225,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  sin.sin_family = AF_INET;
 	  sin.sin_port = htons(port);
 
+	  /* connect immediately if address is raw and legit */
 	  if (bufferevent_socket_connect(partner,
 				    (struct sockaddr*)&sin, sizeof(sin)) != 0)
 	    {
@@ -232,30 +236,35 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  logger_info("* %s", abuf);
 
+	  status = SCONNECTED;
+	  
 	  break;
 	case IPV6:
 
 	  memcpy(v6, buf + 4, sizeof(v6));
 
-      /* Extract 16 bytes address */
-      if (evutil_inet_pton(AF_INET6, v6, &sin6.sin6_addr)<1)
-	{
+	  /* Extract 16 bytes address */
+	  if (evutil_inet_pton(AF_INET6, v6, &sin6.sin6_addr) < 1)
+	    {
 	  
-	  logger_err("v6: failed to resolve addr");
+	      logger_err("v6: failed to resolve addr");
 	  
-	  destroycb(bev);
+	      destroycb(bev);
 	  
-	  return;
-	}
+	      return;
+	    }
 
-      if (bufferevent_socket_connect(partner,
-			 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
-	{
-	  logger_err("connect: failed to connect");
-	  destroycb(bev);
-	  return;
-	}
-	
+	  /* connect immediately if address is raw and legit */
+	  if (bufferevent_socket_connect(partner,
+				 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
+	    {
+	      logger_err("connect: failed to connect");
+	      destroycb(bev);
+	      return;
+	    }
+	  
+	  status = SCONNECTED;
+	  
 	  break;	  
 	case DOMAINN:
 
@@ -267,13 +276,18 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  t.host = buf + 5;
 	  t.len = domlen;
+	  t.bev = bev;
+	  
+	  // if (resolve_host(&t) != 0) {
+	  //   logger_err("failed lookup");
+	  //   destroycb(bev);
+	  //   return;
+	  // }
 
-	  if (resolve_host(&t) != 0) {
-	    logger_err("failed lookup");
-	    destroycb(bev);
-	    return;
-	  }
-       
+	  status = SDNS;
+	  
+	  resolvecb(&t);
+
 	  /* And extract 2 bytes port as well */
 	  memcpy(portbuf, buf + buflen, 2);
 	  port = portbuf[0]<<8 | portbuf[1];
@@ -281,21 +295,29 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  t.sin.sin_family = AF_INET;
 	  t.sin.sin_port = htons(port);
 
-	  if (bufferevent_socket_connect(partner,
-					 (struct sockaddr*)&t.sin, sizeof(t.sin)) != 0)
-	    {
-	      logger_err("connect: failed to connect");
+	  if (status == DNS_OK) {
+	    
+	    if (evutil_inet_ntop(AF_INET,
+		 (struct sockaddr_in*)&t.sin.sin_addr, abuf, sizeof(abuf))
+		== NULL) {
+	      logger_err("failed to resolve host");
 	      destroycb(bev);
-	      return;	      
+	      return;
 	    }
 
-	  if (evutil_inet_ntop(AF_INET,
-			       (struct sockaddr_in*)&t.sin.sin_addr, abuf, sizeof(abuf))
-	      == NULL)
-	    logger_err("failed to resolve host");
+	    if (bufferevent_socket_connect(partner,
+			   (struct sockaddr*)&t.sin, sizeof(t.sin)) != 0)
+	      {
+		logger_err("connect: failed to connect");
+		destroycb(bev);
+		return;	      
+	      }
 
-	  logger_info("resolve_host => %s", abuf);
+	    logger_info("resolve_host => %s", abuf);
 
+	    status = SCONNECTED;
+	  }
+	  
 	  break;
 	default:
 	  logger_err("unkown atype=%d", buf[3]);
@@ -303,13 +325,15 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 
-	/* wait for target's response and if any data back, send it back
-	 * to client 
-	 */
-	bufferevent_setcb(bev, remote_readcb,
-			  NULL, eventcb, partner);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);
-	
+	if (status == SCONNECTED)
+	  {
+	    /* wait for target's response and if any data back, send it back
+	     * to client 
+	     */
+	    bufferevent_setcb(bev, remote_readcb,
+			      NULL, eventcb, partner);
+	    bufferevent_enable(bev, EV_READ|EV_WRITE);
+	  }	
       }
     
   } else {
@@ -317,6 +341,21 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     logger_err("wrong protocol=%d", buf[0]);
     destroycb(bev);
   }
+}
+
+
+static void
+resolvecb(socks_name_t *s)
+{
+
+  if (resolve_host(s) != 0) {
+    status = 0;
+    logger_err("failed lookup");
+    destroycb(s->bev);
+    return;
+  }
+  
+  status = DNS_OK; 
 }
 
 
@@ -522,20 +561,24 @@ acceptcb(struct evconnlistener *listener,
   
 }
 
+
 static void
 syntax(void)
 {  
-  printf("Usage: esocks [options]\n");
-  printf("Options:\n");
-  printf(" -s --server_addr  ADDRESS\n");
-  printf(" -p --server_port  PORT\n");  
-  printf(" -u --local_addr   ADDRESS\n");
-  printf(" -j --local_port   PORT\n");
-  printf(" -k --password     PASSWORD\n");
-  // printf(" -w --worker       WORKERS");
-  // printf(" -b --backend      BACKEND");
-  printf("\n");
-  exit(0);
+  printf("Usage: esocks [OPTIONS] ...\n");
+  puts("");
+  printf("Options\n");
+  printf(" General options:\n");
+  printf("  -s --server_addr  server address\n");
+  printf("  -p --server_port  server port\n");  
+  printf("  -u --local_addr   local address\n");
+  printf("  -j --local_port   local port\n");
+  printf("  -k --password     password to encrypt/decrypt\n");
+  printf("  -w --worker       worker number\n");
+  printf("  -b --backend      backend to use\n");
+  printf("  -r --limit-rate   maximum packet rate in bytes\n");
+  printf("  --local           run local mode\n");  
+  exit(1);
 }
 
 
