@@ -8,6 +8,7 @@
 typedef struct {
   char                   *host;
   size_t                   len; // host length
+  struct bufferevent      *bev;
   struct sockaddr_in       sin;
 #if (SOCKS_HAVE_INET6)  
   struct sockaddr_in6     sin6;

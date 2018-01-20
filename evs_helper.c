@@ -23,13 +23,13 @@ hostcpy(char *dst, char *src, size_t s)
 
       *dst = *src;
       
-      if (*dst == 0) return dst;
+      if (*dst == '\0') return dst;
 
       *dst ++; *src ++;
       
     }
   
-  *dst = 0;
+  *dst = '\0';
   
   return dst;
 }
@@ -47,12 +47,11 @@ resolve_host(socks_name_t *n)
   host = (char*)malloc(n->len + 1);
 
   if (host == NULL) {
-    free(host);
     logger_err("malloc");
     return -1;
   }
 
-  (void) hostcpy(host, n->host, n->len + 1);
+  (void) hostcpy(host, n->host, n->len);
 
   logger_debug(DEBUG, "host:\"%s\"", host);
 
@@ -61,9 +60,9 @@ resolve_host(socks_name_t *n)
   hints.ai_socktype = SOCK_STREAM;
 
   if (getaddrinfo(host, NULL, &hints, &res) != 0) {
-    
-    logger_err("host not found %s", host);
-        
+
+    logger_err("host not found");
+
     free(host);
 
     return -1;
