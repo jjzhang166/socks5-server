@@ -15,7 +15,8 @@ struct host_s {
 struct host_s hosts[] = {
   {"github.com", 11},
   {"tools.ietf.org", 15},
-  {"posteo.de", 11}
+  {"posteo.de", 11},
+  {"google.com", 10}
 };
 
 char *raw_ipv6s[] = {
@@ -39,7 +40,7 @@ test_resolve_name()
     resolve_host(&t);
     
     if (evutil_inet_ntop(AF_INET,
-		    (struct sockaddr_in*)&t.sin.sin_addr, buf, sizeof(buf))
+	    (struct sockaddr_in*)&t.sin.sin_addr, buf, sizeof(buf))
 	== NULL)
       test_failed("resolve_host");
 
@@ -47,7 +48,7 @@ test_resolve_name()
     
 #if SOCKS_HAVE_INET6
     if (evutil_inet_ntop(AF_INET6,
-		  (struct sockaddr_in*)&t.sin6.sin6_addr, buf, sizeof(buf))
+	  (struct sockaddr_in*)&t.sin6.sin6_addr, buf, sizeof(buf))
 	== NULL)
       test_failed("resolve_host");    
    
