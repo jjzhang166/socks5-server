@@ -17,8 +17,5 @@ typedef struct {
 
 
 int resolve_host(socks_name_t *);
-
-char * hostcpy(char *, char *, size_t);
-
   
 #endif

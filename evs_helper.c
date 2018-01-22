@@ -14,25 +14,7 @@
 #include "evs_internal.h"
 
 
-char *
-hostcpy(char *dst, char *src, size_t s)
-{
-  
-  while(s--)
-    {
-
-      *dst = *src;
-      
-      if (*dst == '\0') return dst;
-
-      *dst ++; *src ++;
-      
-    }
-  
-  *dst = '\0';
-  
-  return dst;
-}
+static char * hostcpy(char *, char *, size_t);
 
 
 int
@@ -53,7 +35,7 @@ resolve_host(socks_name_t *n)
 
   (void) hostcpy(host, n->host, n->len);
 
-  logger_debug(DEBUG, "host:\"%s\"", host);
+  logger_debug(DEBUG, "resolve:%s", host);
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -92,7 +74,7 @@ resolve_host(socks_name_t *n)
       continue;
 
     memcpy(&n->sin, p->ai_addr, p->ai_addrlen);
-  
+
   }
 
 #ifdef SOCKS_HAVE_INET6
@@ -111,4 +93,25 @@ resolve_host(socks_name_t *n)
  failed:
   freeaddrinfo(res);
   return -1;
+}
+
+
+static char *
+hostcpy(char *dst, char *src, size_t s)
+{
+  
+  while(s--)
+    {
+
+      *dst = *src;
+      
+      if (*dst == '\0') return dst;
+
+      *dst ++; *src ++;
+      
+    }
+  
+  *dst = '\0';
+  
+  return dst;
 }
