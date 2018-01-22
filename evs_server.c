@@ -165,15 +165,16 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   /*   Consider where and when data should be encrypted/decrypted */
 
   if (buf[0] == SOCKS_VERSION) {
-    
-    
-    logger_info("connecting");
 
     status = SINIT;
-
+    
+    logger_info("connect");
+    
     if (yes_this_is_local)
       {
-	
+    
+	logger_debug(DEBUG, "local connect");
+
         evbuffer_drain(src, buf_size);
 	
 	if (bufferevent_write(bev, payload, 2)<0) {
@@ -198,7 +199,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	bufferevent_disable(bev, EV_READ);
 
 	switch(buf[3]) {
-	  
+
 	case IPV4:
 	  evbuffer_drain(src, buf_size);  
 	  /* Extract 4 bytes address */	  
@@ -225,7 +226,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  sin.sin_family = AF_INET;
 	  sin.sin_port = htons(port);
-
+	  
 	  /* connect immediately if address is raw and legit */
 	  if (bufferevent_socket_connect(partner,
 				    (struct sockaddr*)&sin, sizeof(sin)) != 0)
@@ -235,26 +236,40 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;	      
 	    }
 
-	  logger_info("* %s", abuf);
-
 	  status = SCONNECTED;
 	  
 	  break;
 	case IPV6:
 	  evbuffer_drain(src, buf_size);
-	  memcpy(v6, buf + 4, sizeof(v6));
-
+	  
+	  if (evutil_inet_ntop(AF_INET6, buf + 4, abuf,
+	   		       SOCKS_INET6_ADDRSTRLEN) == NULL)
+	    {
+	      logger_err("invalid v6 address");
+	      destroycb(bev);
+	      return;
+	    }
+  
+	  logger_debug(DEBUG, "connect to %s", abuf);
+	  
 	  /* Extract 16 bytes address */
-	  if (evutil_inet_pton(AF_INET6, v6, &sin6.sin6_addr) < 1)
+	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
 	    {
 	  
 	      logger_err("v6: failed to resolve addr");
 	  
 	      destroycb(bev);
-	  
+
 	      return;
 	    }
 
+	  /* And extract 2 bytes port as well */
+	  memcpy(portbuf, buf + 4 + 16, 2);
+	  port = portbuf[0]<<8 | portbuf[1];
+
+	  sin6.sin6_family = AF_INET6;
+	  sin6.sin6_port = htons(port);
+	  
 	  /* connect immediately if address is raw and legit */
 	  if (bufferevent_socket_connect(partner,
 				 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
@@ -264,13 +279,14 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;
 	    }
 	  
+	  logger_debug(DEBUG, "connect to %s", abuf);
+    
 	  status = SCONNECTED;
 	  
 	  break;	  
 	case DOMAINN:
 
-	  domlen = (size_t) buf[4];
-	  
+	  domlen = (size_t) buf[4];	  
 	  buflen = (int) domlen + 5;
 
 	  memset(&n, 0, sizeof(socks_name_t));
@@ -301,6 +317,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;
 	    }
+	    
+	    logger_info("* %s", abuf);
 
 	    if (bufferevent_socket_connect(partner,
 			   (struct sockaddr*)&n.sin, sizeof(n.sin)) != 0)
@@ -309,8 +327,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 		destroycb(bev);
 		return;
 	      }
-
-	    logger_info("resolve_host => %s", abuf);
 
 	    status = SCONNECTED;
 	  }
@@ -740,8 +756,7 @@ main(int c, char **v)
 		           -1, (struct sockaddr*)&listen_on_addr, socklen);
       
       logger_info("server is up and running %s:%s connecting %s:%s",
-	  o.local_addr, o.local_port, o.server_addr, o.server_port);
-      
+		  o.local_addr, o.local_port, o.server_addr, o.server_port);
     }
   else
     {
@@ -772,9 +787,8 @@ main(int c, char **v)
       listener = evconnlistener_new_bind(base, acceptcb, NULL,
 	LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 	        	 -1, (struct sockaddr*)&listen_on_addr, socklen);
-      logger_info("server is up and running %s:%s connecting %s:%s",
-		 o.server_addr, o.server_port, o.local_addr, o.local_port);
-      
+      logger_info("server is up and running %s:%s", 
+		  o.server_addr, o.server_port);
     }
 
   if (!listener) {
