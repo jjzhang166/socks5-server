@@ -156,7 +156,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   u8 payload[2] = {5, 0};
 
   /* Watch out where we drain the read buffer!! 
-     We cannout proceed next callback func til
+     We cannout proceed next callbacs til
      have a connection.
    */
   evbuffer_copyout(src, buf, buf_size);
@@ -167,7 +167,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   if (buf[0] == SOCKS_VERSION) {
 
     status = SINIT;
-    
+
     logger_info("connect");
     
     if (yes_this_is_local)
@@ -184,7 +184,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  return;
 	}
-	
+
 	bufferevent_setcb(bev, local_readcb, local_writecb,
 			  eventcb, partner);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);	
@@ -195,13 +195,15 @@ socks_initcb(struct bufferevent *bev, void *ctx)
      */
     if (!yes_this_is_local)
       {
-	/* choke to stop reading any data */
+	/* choke bev to stop reading any data */
 	bufferevent_disable(bev, EV_READ);
 
 	switch(buf[3]) {
 
 	case IPV4:
-	  evbuffer_drain(src, buf_size);  
+	  
+	  evbuffer_drain(src, buf_size);
+	  
 	  /* Extract 4 bytes address */	  
 	  memcpy(v4, buf + 4, sizeof(v4));
 
@@ -240,6 +242,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  
 	  break;
 	case IPV6:
+	  
 	  evbuffer_drain(src, buf_size);
 	  
 	  if (evutil_inet_ntop(AF_INET6, buf + 4, abuf,
@@ -251,13 +254,13 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    }
   
 	  logger_debug(DEBUG, "connect to %s", abuf);
-	  
+
 	  /* Extract 16 bytes address */
 	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
 	    {
 	  
 	      logger_err("v6: failed to resolve addr");
-	  
+
 	      destroycb(bev);
 
 	      return;
@@ -294,8 +297,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  n.host = buf + 5;
 	  n.len = domlen;
 	  n.bev = bev;
-
-	  status = SWAIT;
 	  
 	  resolvecb(&n);
 
@@ -307,6 +308,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  n.sin.sin_port = htons(port);
 
 	  if (status == DNS_OK) {
+
+	    logger_debug(DEBUG, "dns_ok");
 	    
 	    evbuffer_drain(src, buf_size);
 	    
@@ -318,7 +321,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;
 	    }
 	    
-	    logger_info("* %s", abuf);
+	    logger_info("* %s:%d", abuf, port);
 
 	    if (bufferevent_socket_connect(partner,
 			   (struct sockaddr*)&n.sin, sizeof(n.sin)) != 0)
@@ -329,6 +332,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      }
 
 	    status = SCONNECTED;
+	    
 	  }
 
 	  break;
@@ -362,7 +366,6 @@ static void
 resolvecb(socks_name_t *s)
 {
   if (resolve_host(s) != 0) {
-    status = 0;
     destroycb(s->bev);
     return;
   }      
@@ -447,9 +450,6 @@ local_readcb(struct bufferevent *bev, void *ctx)
     return;    
   }
 
-  /* let bev write some data since it gets choked.. */
-  bufferevent_enable(bev, EV_WRITE);
-
   /* set callbacks and wait for server response */  
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_WRITE|EV_READ);
@@ -470,9 +470,12 @@ local_writecb(struct bufferevent *bev, void *ctx)
   
   if (status == SINIT) {
     
-    bufferevent_write(bev, payload, 10);
-    bufferevent_disable(bev, EV_WRITE);
-    
+    if (bufferevent_write(bev, payload, 10) <0) {
+      
+    logger_err("bufferevent_write");      
+    destroycb(bev);
+      
+    }
   }
 
   /* change status SINIT to whatever status */
