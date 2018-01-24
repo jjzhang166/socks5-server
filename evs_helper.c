@@ -29,21 +29,25 @@ resolve_host(socks_name_t *n)
   host = (char*)malloc(n->len + 1);
 
   if (host == NULL) {
-    logger_err("malloc");
+    log_err("malloc");
     return -1;
   }
 
   (void) hostcpy(host, n->host, n->len);
 
-  logger_debug(DEBUG, "resolve:%s", host);
+  log_debug(DEBUG, "resolve:%s", host);
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
+  /* This is temporary. 
+   *   TODO: 
+   *  non-blocking lookups 
+   */
   if (getaddrinfo(host, NULL, &hints, &res) != 0) {
 
-    logger_err("host not found");
+    log_err("host not found");
 
     free(host);
 
@@ -64,7 +68,7 @@ resolve_host(socks_name_t *n)
   }
 
   if (i == 0) { /* no results */
-    logger_err("host not found");
+    log_err("host not found");
     goto failed;
   }
 
