@@ -39,18 +39,13 @@
 
 #define MAX_OUTPUT (512 * 1024)
 
-/* local flag */
+
+static int status;
 static int yes_this_is_local;
-
-/* verbose output */
 static int verbose_flag;
-
 static struct event_base *base;
-
 static struct evdns_base *evdns_base;
 
-/* status holds a future event status */
-static int status;
 static void syntax(void);
 static void eventcb(struct bufferevent *bev, short what, void *ctx);
 static void acceptcb(struct evconnlistener *listener, evutil_socket_t fd,
@@ -117,8 +112,8 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *partner = ctx;
 
-  if (what & (BEV_EVENT_CONNECTED))
-    log_debug(DEBUG, "connected=%d", status);
+  // if (what & (BEV_EVENT_CONNECTED))
+  //   log_debug(DEBUG, "connected=%d", status);
 
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
     
@@ -131,18 +126,19 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
       readcb_from_target(bev, ctx);
       
       if (evbuffer_get_length(
-			      bufferevent_get_output(partner))) {
+		      bufferevent_get_output(partner))) {
 	/* We still have to flush data from the other 
 	 * side, but when it's done close the other 
 	 * side. */
 	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, eventcb, NULL);
+	bufferevent_disable(partner, EV_READ);
       } else
 	/* We have nothing left to say to the other 
          * side; close it! */
 	bufferevent_free(partner);
     }
-    
+
     log_debug(DEBUG, "freed");
     bufferevent_free(bev);
     
@@ -188,9 +184,10 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
     log_info("connect");
     
-    if (yes_this_is_local)
+    status = SINIT;
+    
+    if (yes_this_is_local && status == SINIT)
       {
-        status = SINIT;
 	
 	log_debug(DEBUG, "local connect");
 
@@ -212,7 +209,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     /* Basically what we do here is resolve hosts and wait 
      * til we have a connection.
      */
-    if (!yes_this_is_local)
+    if (!yes_this_is_local && status == SINIT)
       {
 	/* choke bev to stop reading any data */
 	bufferevent_disable(bev, EV_READ);
@@ -256,7 +253,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;	      
 	    }
-
+	  log_debug(DEBUG, "v4 connect immediate");
 	  status = SCONNECTED;
 	  
 	  break;
@@ -271,8 +268,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;
 	    }
-  
-	  log_debug(DEBUG, "connect to %s", abuf);
 
 	  /* Extract 16 bytes address */
 	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
@@ -301,19 +296,16 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;
 	    }
 	  
-	  log_debug(DEBUG, "connect to %s", abuf);
-    
+	  log_debug(DEBUG, "connect immediate to %s", abuf);    
 	  status = SCONNECTED;
 	  
 	  break;	  
 	case DOMAINN:
 	  
-	  evbuffer_drain(src, buf_size);
-	  
 	  domlen = (size_t) buf[4];	  
 	  buflen = (int) domlen + 5;
 
-	  memset(&n, 0, sizeof(socks_name_t));
+	  memset(&n, 0, sizeof(n));
 
 	  n.host = buf + 5;
 	  n.len = domlen;
@@ -337,9 +329,11 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    if (evutil_inet_ntop(AF_INET,
 		 (struct sockaddr_in*)&n.sin.sin_addr, abuf, sizeof(abuf))
 		== NULL) {
+	      
 	      log_err("failed to resolve host");
 	      destroycb(bev);
 	      return;
+	      
 	    }
 	    
 	    log_info("* %s:%d", abuf, port);
@@ -370,9 +364,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    bufferevent_setcb(bev, remote_readcb,
 			      NULL, eventcb, partner);
 	    bufferevent_enable(bev, EV_READ|EV_WRITE);
-	  }	
+	  }
       }
-    
+
   } else {
     /* Seems a wrong protocol; get this destroyed. */
     log_err("wrong protocol=%d", buf[0]);
@@ -399,14 +393,13 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
   
-  size_t buf_size = evbuffer_get_length(src);
-  
+  size_t buf_size = evbuffer_get_length(src);  
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
   
-  log_debug(DEBUG, "payload to targ=%ld", buf_size);
+  log_debug(DEBUG, "payload to target=%ld", buf_size);
   
   if (bufferevent_write(partner, buf, buf_size) <0) {
     
@@ -836,8 +829,8 @@ main(int c, char **v)
  
  	  listener = evconnlistener_new(base, acceptcb, NULL,
 			LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC, -1, fd);
- 	  log_info("fastopen");
-#else	  
+ 	  log_info("fastopen enabled");
+#else
 
 	  /* Ready for forward connections from clients */
 	  listener = evconnlistener_new_bind(base, acceptcb, NULL,
