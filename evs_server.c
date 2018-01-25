@@ -23,6 +23,10 @@
 #include <arpa/inet.h>
 #endif
 
+#ifdef FAST_OPEN /* Experimental, only for Linux */
+#include <netinet/tcp.h>
+#endif
+
 #include <sys/stat.h>
 #include <getopt.h>
 #include <signal.h>
@@ -613,6 +617,21 @@ acceptcb(struct evconnlistener *listener,
 
 
 static void
+signal_func(evutil_socket_t sig_flag, short what, void *ctx)
+{
+  struct event_base *base = ctx;
+  struct timeval delay = {1, 0};
+  int sec = 1;
+  
+  logger_info(
+       "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
+  
+  event_base_loopexit(base, &delay);
+  
+}
+
+
+static void
 syntax(void)
 {  
   printf("Usage: esocks [OPTIONS] ...\n");
@@ -629,21 +648,6 @@ syntax(void)
   printf("  -r --limit-rate   maximum packet rate in bytes\n");
   printf("  --local           run local mode\n");  
   exit(1);
-}
-
-
-static void
-signal_func(evutil_socket_t sig_flag, short what, void *ctx)
-{
-  struct event_base *base = ctx;
-  struct timeval delay = {1, 0};
-  int sec = 1;
-  
-  logger_info(
-       "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
-  
-  event_base_loopexit(base, &delay);
-  
 }
 
 
@@ -744,7 +748,6 @@ main(int c, char **v)
     /* A server is requested running in local mode
        Server should connect to a remote server
     */
-  
     {
       if (evutil_parse_sockaddr_port(o.local_port,
 			   (struct sockaddr*)&listen_on_addr, &socklen)<0)
@@ -764,13 +767,13 @@ main(int c, char **v)
 	  sin->sin_family = AF_INET; /* TODO IPv6 */
 	  
 	}
-      
+
       /* Prep forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
 			      (struct sockaddr*)&forward_addr, &socklen)<0)
 	{
 	  struct sockaddr_in *fsin = (struct sockaddr_in*)&forward_addr;
-	  
+
 	  port = atoi(o.server_port);
 	  
 	  if (port < 1 || port > 65535)
@@ -795,37 +798,61 @@ main(int c, char **v)
     }
   else
     {
-      
+
       /* Running as forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
-		     (struct sockaddr*)&listen_on_addr, &socklen)<0)
+				     (struct sockaddr*)&listen_on_addr, &socklen)<0)
 	{
 	  struct sockaddr_in *sin = (struct sockaddr_in*)&listen_on_addr;
-	  
+      
 	  port = atoi(o.server_port);
 	  
 	  if (port < 1 || port > 65535)
 	    syntax();
 	  
 	  sin->sin_port = htons(port);
-	  
+	  sin->sin_family = AF_INET; /* TODO IPv6 */
+      
 	  if (evutil_inet_pton(AF_INET, o.server_addr, &sin->sin_addr)<0)
 	    syntax();
-	  
-	  sin->sin_family = AF_INET; /* TODO IPv6 */
-	  
-	  socklen = sizeof(struct sockaddr_in);
+
+#ifdef FAST_OPEN /* Experimental */
+ 	  int fd;
+ 	  int optval = 5;
+ 	  
+ 	  fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
+ 
+ 	  if (fd == -1)
+ 	    logger_errx(1, "fd");
+   
+ 	  if (setsockopt(fd, SOL_TCP, TCP_FASTOPEN, (void*)&optval, sizeof(optval))<0)
+ 	    logger_errx(1, "sockopt");
+ 
+ 	  /* TODO: error check */
+ 	  evutil_make_listen_socket_reuseable(fd);
+ 	  evutil_make_listen_socket_reuseable_port(fd);
+ 	  evutil_make_tcp_listen_socket_deferred(fd);
+ 	  bind(fd, (struct sockaddr*)&listen_on_addr, sizeof(listen_on_addr));
+ 
+ 	  listener = evconnlistener_new(base, acceptcb, NULL,
+			LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC, -1, fd);
+ 	  logger_info("fastopen");
+#else	  
+
+	  /* Ready for forward connections from clients */
+	  listener = evconnlistener_new_bind(base, acceptcb, NULL,
+	     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
+					     -1, (struct sockaddr*)&listen_on_addr,
+					     socklen);
+
+#endif /* FAST_OPEN */
 	  
 	}
       
-      /* Ready for forward connections from clients */
-      listener = evconnlistener_new_bind(base, acceptcb, NULL,
-	LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
-	        	 -1, (struct sockaddr*)&listen_on_addr, socklen);
       logger_info("server is up and running %s:%s", 
-		  o.server_addr, o.server_port);
+		  o.server_addr, o.server_port);      
     }
-
+  
   if (!listener) {
     
     logger_err("bind");  
