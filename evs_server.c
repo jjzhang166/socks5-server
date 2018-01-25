@@ -23,10 +23,13 @@
 #include <arpa/inet.h>
 #endif
 
+#ifdef FAST_OPEN /* Experimental, only for Linux */
+#include <netinet/tcp.h>
+#endif
+
 #include <sys/stat.h>
 #include <getopt.h>
 #include <signal.h>
-
 
 #include <event2/listener.h>
 
@@ -36,18 +39,13 @@
 
 #define MAX_OUTPUT (512 * 1024)
 
-/* local flag */
+
+static int status;
 static int yes_this_is_local;
-
-/* verbose output */
 static int verbose_flag;
-
 static struct event_base *base;
-
 static struct evdns_base *evdns_base;
 
-/* status holds a future event status */
-static int status;
 static void syntax(void);
 static void eventcb(struct bufferevent *bev, short what, void *ctx);
 static void acceptcb(struct evconnlistener *listener, evutil_socket_t fd,
@@ -62,6 +60,23 @@ static void remote_readcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 static void resolvecb(socks_name_t *);
+static void app_fatal_cb(int err);
+static void internal_logcb(int sev, const char *msg);
+
+
+static void
+internal_logcb(int sev, const char *msg)
+{
+  log_debug(DEBUG, "levent=%d; internal=%s", sev, msg);
+}
+
+
+static void
+app_fatal_cb(int err)
+{
+  log_err("fatal %d", err);
+  exit(1);
+}
 
 static void
 destroycb(struct bufferevent *bev)
@@ -97,8 +112,8 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 
   struct bufferevent *partner = ctx;
 
-  if (what & (BEV_EVENT_CONNECTED))
-    log_debug(DEBUG, "connected=%d", status);
+  // if (what & (BEV_EVENT_CONNECTED))
+  //   log_debug(DEBUG, "connected=%d", status);
 
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
     
@@ -111,18 +126,19 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
       readcb_from_target(bev, ctx);
       
       if (evbuffer_get_length(
-			      bufferevent_get_output(partner))) {
+		      bufferevent_get_output(partner))) {
 	/* We still have to flush data from the other 
 	 * side, but when it's done close the other 
 	 * side. */
 	bufferevent_setcb(partner, NULL,
 			  close_on_finished_writecb, eventcb, NULL);
+	bufferevent_disable(partner, EV_READ);
       } else
 	/* We have nothing left to say to the other 
          * side; close it! */
 	bufferevent_free(partner);
     }
-    
+
     log_debug(DEBUG, "freed");
     bufferevent_free(bev);
     
@@ -166,13 +182,12 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   if (buf[0] == SOCKS_VERSION) {
 
-    status = SINIT;
-
     log_info("connect");
     
-    if (yes_this_is_local)
-      {
+    status = SINIT;
     
+    if (yes_this_is_local && status == SINIT)
+      {
 	log_debug(DEBUG, "local connect");
 
         evbuffer_drain(src, buf_size);
@@ -185,7 +200,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 
-	bufferevent_setcb(bev, local_readcb, local_writecb,
+	bufferevent_setcb(bev, local_readcb, NULL,
 			  eventcb, partner);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);	
       }
@@ -193,7 +208,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     /* Basically what we do here is resolve hosts and wait 
      * til we have a connection.
      */
-    if (!yes_this_is_local)
+    if (!yes_this_is_local && status == SINIT)
       {
 	/* choke bev to stop reading any data */
 	bufferevent_disable(bev, EV_READ);
@@ -237,7 +252,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;	      
 	    }
-
+	  log_debug(DEBUG, "v4 connect immediate");
 	  status = SCONNECTED;
 	  
 	  break;
@@ -252,8 +267,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;
 	    }
-  
-	  log_debug(DEBUG, "connect to %s", abuf);
 
 	  /* Extract 16 bytes address */
 	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
@@ -281,18 +294,17 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      destroycb(bev);
 	      return;
 	    }
-	  
-	  log_debug(DEBUG, "connect to %s", abuf);
-    
+
+	  log_debug(DEBUG, "connect immediate to %s", abuf);    
 	  status = SCONNECTED;
 	  
 	  break;	  
 	case DOMAINN:
-
+	  
 	  domlen = (size_t) buf[4];	  
 	  buflen = (int) domlen + 5;
 
-	  memset(&n, 0, sizeof(socks_name_t));
+	  memset(&n, 0, sizeof(n));
 
 	  n.host = buf + 5;
 	  n.len = domlen;
@@ -319,6 +331,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      log_err("failed to resolve host");
 	      destroycb(bev);
 	      return;
+	      
 	    }
 	    
 	    log_info("* %s:%d", abuf, port);
@@ -331,8 +344,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 		return;
 	      }
 
-	    status = SCONNECTED;
-	    
+	    status = SCONNECTED;	    
 	  }
 
 	  break;
@@ -350,9 +362,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    bufferevent_setcb(bev, remote_readcb,
 			      NULL, eventcb, partner);
 	    bufferevent_enable(bev, EV_READ|EV_WRITE);
-	  }	
+	  }
       }
-    
+
   } else {
     /* Seems a wrong protocol; get this destroyed. */
     log_err("wrong protocol=%d", buf[0]);
@@ -379,14 +391,13 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   struct bufferevent *partner = ctx;
   struct evbuffer *src = bufferevent_get_input(bev);
   
-  size_t buf_size = evbuffer_get_length(src);
-  
+  size_t buf_size = evbuffer_get_length(src);  
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
   
-  log_debug(DEBUG, "payload to targ=%ld", buf_size);
+  log_debug(DEBUG, "payload to target=%ld", buf_size);
   
   if (bufferevent_write(partner, buf, buf_size) <0) {
     
@@ -417,16 +428,28 @@ local_readcb(struct bufferevent *bev, void *ctx)
   struct evbuffer *src = bufferevent_get_input(bev);
   size_t buf_size = evbuffer_get_length(src);
 
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};    
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
-  
+
   socks_cmd_e cmd = buf[1];
 
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buf[0] == SOCKS_VERSION)
     {
+
+      if (bufferevent_write(bev, payload, 10) <0) {
+      
+	log_err("bufferevent_write");      
+	destroycb(bev);
+	return;
+	
+      }
+      
+      status = SWAIT;
+      
       /* parse socks header */
       switch (cmd) {
       case CONNECT:
@@ -491,9 +514,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   size_t buf_size;
   
   src = bufferevent_get_input(bev);
-
   buf_size  = evbuffer_get_length(src);
-  
   u8 buf[buf_size];
   
   if (!partner) {
@@ -587,6 +608,21 @@ acceptcb(struct evconnlistener *listener,
 
 
 static void
+signal_func(evutil_socket_t sig_flag, short what, void *ctx)
+{
+  struct event_base *base = ctx;
+  struct timeval delay = {1, 0};
+  int sec = 1;
+  
+  log_info(
+       "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
+  
+  event_base_loopexit(base, &delay);
+  
+}
+
+
+static void
 syntax(void)
 {  
   printf("Usage: esocks [OPTIONS] ...\n");
@@ -606,40 +642,22 @@ syntax(void)
 }
 
 
+struct options {
+  const char *server_addr;    
+  const char *server_port;    
+  const char  *local_addr;
+  const char  *local_port;        
+  const char    *password;
+  const char     *backend;  
+  const char      *worker;
+  const char        *rate;
+};
+
+
 static void
-signal_func(evutil_socket_t sig_flag, short what, void *ctx)
+parse_opt(struct options *opt, int c, char **v)
 {
-  struct event_base *base = ctx;
-  struct timeval delay = {1, 0};
-  int sec = 1;
-  
-  log_info(
-       "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
-  
-  event_base_loopexit(base, &delay);
-  
-}
-
-
-int
-main(int c, char **v)
-{
-  struct event_config *config;
-  const char *levent_ver = event_get_version();  
-
   int cc;
-  struct options {
-    const char *server_addr;    
-    const char *server_port;    
-    const char  *local_addr;
-    const char  *local_port;        
-    const char    *password;
-  };
-
-  struct options o;
-  char opt;  
-
-  memset(&o, 0, sizeof(o));
   
   while (1)
     {
@@ -665,21 +683,33 @@ main(int c, char **v)
 	{
 	case 0:
 	  if (lp[opt_index].flag != 0) break;
-	case 's': o.server_addr = optarg; break;
-	case 'p': o.server_port = optarg; break;
-	case 'u': o.local_addr  = optarg; break;
-	case 'j': o.local_port  = optarg; break;
-	case 'k': o.password    = optarg; break;
+	case 's': opt->server_addr = optarg; break;
+	case 'p': opt->server_port = optarg; break;
+	case 'u': opt->local_addr  = optarg; break;
+	case 'j': opt->local_port  = optarg; break;
+	case 'k': opt->password    = optarg; break;
 	case 'l':      yes_this_is_local; break;
 	case 'v':         verbose_flag++; break;
 	case '?':               syntax(); break;
 	}
-    }
+    }  
+}
 
+
+int
+main(int c, char **v)
+{    
+  int cc;
+  char opt;    
+  struct options o;
+
+  memset(&o, 0, sizeof(o));
+  parse_opt(&o, c, v);
+  
   if (yes_this_is_local) {
     
     if (!(o.local_port && o.local_addr && o.password &&
-	  o.server_addr && o.server_port))
+	  o.server_addr && o.server_port))  
       syntax();
     
   } else { /* forward server */
@@ -688,21 +718,21 @@ main(int c, char **v)
       syntax();
     
   }
-
-  int              fsocklen, socklen, port, mode;
+  
   struct evconnlistener               *listener;  
   static struct sockaddr_storage listen_on_addr;
   static struct sockaddr_storage   forward_addr;  
   struct event                    *signal_event;
+  int                                      mode;
+  int                                      port;
+  int      socklen = sizeof(struct sockaddr_in);
+  const char  *levent_ver = event_get_version();  
   
-  memset(&listen_on_addr, 0, sizeof(listen_on_addr));
-  
-  socklen = sizeof(listen_on_addr);
+  event_set_fatal_callback(app_fatal_cb);
 
+  memset(&listen_on_addr, 0, sizeof(listen_on_addr));
   memset(&forward_addr, 0, sizeof(forward_addr));
   
-  fsocklen = sizeof(forward_addr);
-    
   base = event_base_new();
 
   if (yes_this_is_local)
@@ -727,16 +757,14 @@ main(int c, char **v)
 	  
 	  sin->sin_family = AF_INET; /* TODO IPv6 */
 	  
-	  socklen = sizeof(struct sockaddr_in);
-	  
 	}
-      
+
       /* Prep forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
 			      (struct sockaddr*)&forward_addr, &socklen)<0)
 	{
 	  struct sockaddr_in *fsin = (struct sockaddr_in*)&forward_addr;
-	  
+
 	  port = atoi(o.server_port);
 	  
 	  if (port < 1 || port > 65535)
@@ -747,9 +775,7 @@ main(int c, char **v)
 	  if (evutil_inet_pton(AF_INET, o.server_addr, &fsin->sin_addr)<0)
 	    syntax();
 	  
-	  fsin->sin_family = AF_INET; /* TODO IPv6 */
-	  
-	  fsocklen = sizeof(struct sockaddr_in);
+	  fsin->sin_family = AF_INET; /* TODO IPv6 */	 
 	  
 	}
       
@@ -763,45 +789,67 @@ main(int c, char **v)
     }
   else
     {
+
       /* Running as forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
-		     (struct sockaddr*)&listen_on_addr, &socklen)<0)
+				     (struct sockaddr*)&listen_on_addr, &socklen)<0)
 	{
-	  
 	  struct sockaddr_in *sin = (struct sockaddr_in*)&listen_on_addr;
-	  
+      
 	  port = atoi(o.server_port);
 	  
 	  if (port < 1 || port > 65535)
 	    syntax();
 	  
 	  sin->sin_port = htons(port);
-	  
+	  sin->sin_family = AF_INET; /* TODO IPv6 */
+      
 	  if (evutil_inet_pton(AF_INET, o.server_addr, &sin->sin_addr)<0)
 	    syntax();
-	  
-	  sin->sin_family = AF_INET; /* TODO IPv6 */
-	  
-	  socklen = sizeof(struct sockaddr_in);
+
+#ifdef FAST_OPEN /* Experimental */
+ 	  int fd;
+ 	  int optval = 5;
+ 	  
+ 	  fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
+ 
+ 	  if (fd == -1)
+ 	    log_errx(1, "fd");
+   
+ 	  if (setsockopt(fd, SOL_TCP, TCP_FASTOPEN, (void*)&optval, sizeof(optval))<0)
+ 	    log_errx(1, "sockopt");
+ 
+ 	  /* TODO: error check */
+ 	  evutil_make_listen_socket_reuseable(fd);
+ 	  evutil_make_listen_socket_reuseable_port(fd);
+ 	  evutil_make_tcp_listen_socket_deferred(fd);
+ 	  bind(fd, (struct sockaddr*)&listen_on_addr, sizeof(listen_on_addr));
+ 
+ 	  listener = evconnlistener_new(base, acceptcb, NULL,
+			LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC, -1, fd);
+ 	  log_info("fastopen enabled");
+#else
+
+	  /* Ready for forward connections from clients */
+	  listener = evconnlistener_new_bind(base, acceptcb, NULL,
+	     LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
+					     -1, (struct sockaddr*)&listen_on_addr,
+					     socklen);
+
+#endif /* FAST_OPEN */
 	  
 	}
-      
-      /* Ready for forward connections from clients */
-      listener = evconnlistener_new_bind(base, acceptcb, NULL,
-	LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
-	        	 -1, (struct sockaddr*)&listen_on_addr, socklen);
-      log_info("server is up and running %s:%s", 
-		  o.server_addr, o.server_port);
-    }
 
+      log_info("server is up and running %s:%s", 
+		  o.server_addr, o.server_port);      
+    }
+  
   if (!listener) {
     
-    log_err("bind");
-    
+    log_err("bind");  
     event_base_free(base);
     
     return 1;
-    
   }
 
   if (DEBUG == 1) log_debug(DEBUG, "DEBUG MODE");
@@ -817,7 +865,6 @@ main(int c, char **v)
   log_info("Libevent version: %s", levent_ver);
   
   event_base_dispatch(base);
-  
   event_base_free(base);
   
   return 0;
