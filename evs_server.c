@@ -72,14 +72,14 @@ static void internal_logcb(int sev, const char *msg);
 static void
 internal_logcb(int sev, const char *msg)
 {
-  logger_debug(DEBUG, "levent=%d; internal=%s", sev, msg);
+  log_debug(DEBUG, "levent=%d; internal=%s", sev, msg);
 }
 
 
 static void
 app_fatal_cb(int err)
 {
-  logger_err("fatal %d", err);
+  log_err("fatal %d", err);
   exit(1);
 }
 
@@ -88,7 +88,7 @@ destroycb(struct bufferevent *bev)
 {
   status = 0;
   
-  logger_info("destroyed");
+  log_info("destroyed");
 
   /* Unset all callbacks */
   bufferevent_free(bev);
@@ -106,7 +106,7 @@ close_on_finished_writecb(struct bufferevent *bev, void *ctx)
     
     bufferevent_free(bev);
     
-    logger_debug(DEBUG, "close_on_finished_writecb freed");   
+    log_debug(DEBUG, "close_on_finished_writecb freed");   
   }
 }
 
@@ -118,12 +118,12 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
   struct bufferevent *partner = ctx;
 
   if (what & (BEV_EVENT_CONNECTED))
-    logger_debug(DEBUG, "connected=%d", status);
+    log_debug(DEBUG, "connected=%d", status);
 
   if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
     
     if (what & BEV_EVENT_ERROR)
-      logger_err("eventcb");
+      log_err("eventcb");
     
     if (partner) {
 
@@ -143,7 +143,7 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
 	bufferevent_free(partner);
     }
     
-    logger_debug(DEBUG, "freed");
+    log_debug(DEBUG, "freed");
     bufferevent_free(bev);
     
   }
@@ -186,19 +186,19 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   if (buf[0] == SOCKS_VERSION) {
 
-    logger_info("connect");
+    log_info("connect");
     
     if (yes_this_is_local)
       {
         status = SINIT;
 	
-	logger_debug(DEBUG, "local connect");
+	log_debug(DEBUG, "local connect");
 
         evbuffer_drain(src, buf_size);
 	
 	if (bufferevent_write(bev, payload, 2)<0) {
       
-	  logger_err("bufferevent_write");      
+	  log_err("bufferevent_write");      
 	  destroycb(bev);
 
 	  return;
@@ -229,14 +229,14 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  if (evutil_inet_ntop(AF_INET, v4, abuf,
 	   		       SOCKS_INET_ADDRSTRLEN) == NULL)
 	    {
-	      logger_err("invalid v4 address");
+	      log_err("invalid v4 address");
 	      destroycb(bev);
 	      return;
 	    }
 	  
 	  if (evutil_inet_pton(AF_INET, abuf, &sin.sin_addr) < 1)
 	    {
-	      logger_err("failed to resolve addr");
+	      log_err("failed to resolve addr");
 	      destroycb(bev);
 	      return;
 	    }
@@ -252,7 +252,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  if (bufferevent_socket_connect(partner,
 				    (struct sockaddr*)&sin, sizeof(sin)) != 0)
 	    {
-	      logger_err("connect: failed to connect");
+	      log_err("connect: failed to connect");
 	      destroycb(bev);
 	      return;	      
 	    }
@@ -267,18 +267,18 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  if (evutil_inet_ntop(AF_INET6, buf + 4, abuf,
 	   		       SOCKS_INET6_ADDRSTRLEN) == NULL)
 	    {
-	      logger_err("invalid v6 address");
+	      log_err("invalid v6 address");
 	      destroycb(bev);
 	      return;
 	    }
   
-	  logger_debug(DEBUG, "connect to %s", abuf);
+	  log_debug(DEBUG, "connect to %s", abuf);
 
 	  /* Extract 16 bytes address */
 	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
 	    {
 	  
-	      logger_err("v6: failed to resolve addr");
+	      log_err("v6: failed to resolve addr");
 
 	      destroycb(bev);
 
@@ -296,12 +296,12 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  if (bufferevent_socket_connect(partner,
 				 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
 	    {
-	      logger_err("connect: failed to connect");
+	      log_err("connect: failed to connect");
 	      destroycb(bev);
 	      return;
 	    }
 	  
-	  logger_debug(DEBUG, "connect to %s", abuf);
+	  log_debug(DEBUG, "connect to %s", abuf);
     
 	  status = SCONNECTED;
 	  
@@ -330,24 +330,24 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  if (status == DNS_OK) {
 
-	    logger_debug(DEBUG, "dns_ok");
+	    log_debug(DEBUG, "dns_ok");
 	    
 	    evbuffer_drain(src, buf_size);
 	    
 	    if (evutil_inet_ntop(AF_INET,
 		 (struct sockaddr_in*)&n.sin.sin_addr, abuf, sizeof(abuf))
 		== NULL) {
-	      logger_err("failed to resolve host");
+	      log_err("failed to resolve host");
 	      destroycb(bev);
 	      return;
 	    }
 	    
-	    logger_info("* %s:%d", abuf, port);
+	    log_info("* %s:%d", abuf, port);
 
 	    if (bufferevent_socket_connect(partner,
 			   (struct sockaddr*)&n.sin, sizeof(n.sin)) != 0)
 	      {
-		logger_err("connect: failed to connect");
+		log_err("connect: failed to connect");
 		destroycb(bev);
 		return;
 	      }
@@ -357,7 +357,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  break;
 	default:
-	  logger_err("unkown atype=%d", buf[3]);
+	  log_err("unkown atype=%d", buf[3]);
 	  destroycb(bev);
 	  return;
 	}
@@ -375,7 +375,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     
   } else {
     /* Seems a wrong protocol; get this destroyed. */
-    logger_err("wrong protocol=%d", buf[0]);
+    log_err("wrong protocol=%d", buf[0]);
     destroycb(bev);
     return;
   }
@@ -406,11 +406,11 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
   
-  logger_debug(DEBUG, "payload to targ=%ld", buf_size);
+  log_debug(DEBUG, "payload to targ=%ld", buf_size);
   
   if (bufferevent_write(partner, buf, buf_size) <0) {
     
-    logger_err("bufferevent_write");      
+    log_err("bufferevent_write");      
     destroycb(bev);
     
     return;
@@ -451,7 +451,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
 
       if (bufferevent_write(bev, payload, 10) <0) {
       
-	logger_err("bufferevent_write");      
+	log_err("bufferevent_write");      
 	destroycb(bev);
 	return;
 	
@@ -465,10 +465,10 @@ local_readcb(struct bufferevent *bev, void *ctx)
       case BIND:
 	break;
       case UDPASSOC:
-	logger_warn("udp associate");
+	log_warn("udp associate");
 	break;
       default:
-	logger_warn("unkonw cmd=%d", buf[1]);
+	log_warn("unkonw cmd=%d", buf[1]);
 	destroycb(bev);
 	return;
       }  
@@ -476,7 +476,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
   
   if (bufferevent_write(partner, buf, buf_size) <0) {
     
-    logger_err("bufferevent_write");      
+    log_err("bufferevent_write");      
     destroycb(bev);
 
     return;    
@@ -504,7 +504,7 @@ local_writecb(struct bufferevent *bev, void *ctx)
     
     if (bufferevent_write(bev, payload, 10) <0) {
       
-    logger_err("bufferevent_write");      
+    log_err("bufferevent_write");      
     destroycb(bev);
       
     }
@@ -528,7 +528,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   
   if (!partner) {
 
-    logger_debug(DEBUG, "readcb_from_target drain");    
+    log_debug(DEBUG, "readcb_from_target drain");    
     evbuffer_drain(src, buf_size);
 
     return;
@@ -537,11 +537,11 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   evbuffer_copyout(src, buf, buf_size);
   evbuffer_drain(src, buf_size);
   
-  logger_debug(DEBUG, "drained=%ld", buf_size);
+  log_debug(DEBUG, "drained=%ld", buf_size);
   
   if (bufferevent_write(partner, buf, buf_size) < 0) {
       
-    logger_err("bufferevent_write");      
+    log_err("bufferevent_write");      
     destroycb(bev);
 
     return;    
@@ -552,7 +552,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
     
-    logger_debug(DEBUG, "exceeding MAX_OUTPUT %ld",
+    log_debug(DEBUG, "exceeding MAX_OUTPUT %ld",
 		 evbuffer_get_length(dst));
     
     bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);    
@@ -568,7 +568,7 @@ drained_writecb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
   
-  logger_debug(DEBUG, "EXCEEDING MAX_OUTPUT %ld",
+  log_debug(DEBUG, "EXCEEDING MAX_OUTPUT %ld",
 	       evbuffer_get_length(bufferevent_get_output(bev)));
   
   bufferevent_setcb(partner, readcb_from_target,
@@ -598,7 +598,7 @@ acceptcb(struct evconnlistener *listener,
       if (bufferevent_socket_connect(partner,
 				     sa, sizeof(struct sockaddr_in))<0)
 	{
-	  logger_err("cannot connect to the server");
+	  log_err("cannot connect to the server");
 	}
     }
 
@@ -623,7 +623,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   struct timeval delay = {1, 0};
   int sec = 1;
   
-  logger_info(
+  log_info(
        "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   
   event_base_loopexit(base, &delay);
@@ -793,7 +793,7 @@ main(int c, char **v)
 	    LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC,
 		           -1, (struct sockaddr*)&listen_on_addr, socklen);
       
-      logger_info("server is up and running %s:%s connecting %s:%s",
+      log_info("server is up and running %s:%s connecting %s:%s",
 		  o.local_addr, o.local_port, o.server_addr, o.server_port);
     }
   else
@@ -823,10 +823,10 @@ main(int c, char **v)
  	  fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
  
  	  if (fd == -1)
- 	    logger_errx(1, "fd");
+ 	    log_errx(1, "fd");
    
  	  if (setsockopt(fd, SOL_TCP, TCP_FASTOPEN, (void*)&optval, sizeof(optval))<0)
- 	    logger_errx(1, "sockopt");
+ 	    log_errx(1, "sockopt");
  
  	  /* TODO: error check */
  	  evutil_make_listen_socket_reuseable(fd);
@@ -836,7 +836,7 @@ main(int c, char **v)
  
  	  listener = evconnlistener_new(base, acceptcb, NULL,
 			LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE|LEV_OPT_CLOSE_ON_EXEC, -1, fd);
- 	  logger_info("fastopen");
+ 	  log_info("fastopen");
 #else	  
 
 	  /* Ready for forward connections from clients */
@@ -849,29 +849,29 @@ main(int c, char **v)
 	  
 	}
       
-      logger_info("server is up and running %s:%s", 
+      log_info("server is up and running %s:%s", 
 		  o.server_addr, o.server_port);      
     }
   
   if (!listener) {
     
-    logger_err("bind");  
+    log_err("bind");  
     event_base_free(base);
     
     return 1;
   }
 
-  if (DEBUG == 1) logger_debug(DEBUG, "DEBUG MODE");
+  if (DEBUG == 1) log_debug(DEBUG, "DEBUG MODE");
   
   signal_event = event_new(base, SIGINT,
 			   EV_SIGNAL|EV_PERSIST, signal_func, (void*)base);
   
   if (!signal_event || event_add(signal_event, NULL))
-    logger_errx(1, "Cannot add a signal_event");
+    log_errx(1, "Cannot add a signal_event");
   
-  logger_info("`%s` mode",
+  log_info("`%s` mode",
 	      yes_this_is_local ? "local" : "remote");
-  logger_info("Libevent version: %s", levent_ver);
+  log_info("Libevent version: %s", levent_ver);
   
   event_base_dispatch(base);
   event_base_free(base);

@@ -16,7 +16,7 @@
 static void socks_log(int serverity, const char *msg);
 
 void
-logger_errx(int eval, const char *fmt, ...)
+log_errx(int eval, const char *fmt, ...)
 {
   va_list ap;
 
@@ -27,7 +27,7 @@ logger_errx(int eval, const char *fmt, ...)
 }
 
 void
-logger_err(const char *fmt, ...)
+log_err(const char *fmt, ...)
 {
   va_list ap;
 
@@ -37,7 +37,7 @@ logger_err(const char *fmt, ...)
 }
 
 void
-logger_warn(const char *fmt, ...)
+log_warn(const char *fmt, ...)
 {
   va_list ap;
 
@@ -47,7 +47,7 @@ logger_warn(const char *fmt, ...)
 }
 
 void
-logger_debug(int v, const char *fmt, ...)
+log_debug(int v, const char *fmt, ...)
 {
   va_list ap;
 
@@ -59,7 +59,7 @@ logger_debug(int v, const char *fmt, ...)
 }
 
 void
-logger_info(const char *fmt, ...)
+log_info(const char *fmt, ...)
 {
   va_list ap;
 
