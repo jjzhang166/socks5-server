@@ -27,7 +27,6 @@
 #include <getopt.h>
 #include <signal.h>
 
-
 #include <event2/listener.h>
 
 #include "evs_internal.h"
@@ -62,6 +61,23 @@ static void remote_readcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 static void resolvecb(socks_name_t *);
+static void app_fatal_cb(int err);
+static void internal_logcb(int sev, const char *msg);
+
+
+static void
+internal_logcb(int sev, const char *msg)
+{
+  logger_debug(DEBUG, "levent=%d; internal=%s", sev, msg);
+}
+
+
+static void
+app_fatal_cb(int err)
+{
+  logger_err("fatal %d", err);
+  exit(1);
+}
 
 static void
 destroycb(struct bufferevent *bev)
@@ -166,13 +182,12 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   if (buf[0] == SOCKS_VERSION) {
 
-    status = SINIT;
-
     logger_info("connect");
     
     if (yes_this_is_local)
       {
-    
+        status = SINIT;
+	
 	logger_debug(DEBUG, "local connect");
 
         evbuffer_drain(src, buf_size);
@@ -185,7 +200,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 
-	bufferevent_setcb(bev, local_readcb, local_writecb,
+	bufferevent_setcb(bev, local_readcb, NULL,
 			  eventcb, partner);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);	
       }
@@ -288,7 +303,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  
 	  break;	  
 	case DOMAINN:
-
+	  
+	  evbuffer_drain(src, buf_size);
+	  
 	  domlen = (size_t) buf[4];	  
 	  buflen = (int) domlen + 5;
 
@@ -331,8 +348,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 		return;
 	      }
 
-	    status = SCONNECTED;
-	    
+	    status = SCONNECTED;	    
 	  }
 
 	  break;
@@ -417,16 +433,28 @@ local_readcb(struct bufferevent *bev, void *ctx)
   struct evbuffer *src = bufferevent_get_input(bev);
   size_t buf_size = evbuffer_get_length(src);
 
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};    
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
-  
+
   socks_cmd_e cmd = buf[1];
 
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buf[0] == SOCKS_VERSION)
     {
+
+      if (bufferevent_write(bev, payload, 10) <0) {
+      
+	logger_err("bufferevent_write");      
+	destroycb(bev);
+	return;
+	
+      }
+      
+      status = SWAIT;
+      
       /* parse socks header */
       switch (cmd) {
       case CONNECT:
@@ -491,9 +519,7 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   size_t buf_size;
   
   src = bufferevent_get_input(bev);
-
   buf_size  = evbuffer_get_length(src);
-  
   u8 buf[buf_size];
   
   if (!partner) {
@@ -621,25 +647,22 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
 }
 
 
-int
-main(int c, char **v)
+struct options {
+  const char *server_addr;    
+  const char *server_port;    
+  const char  *local_addr;
+  const char  *local_port;        
+  const char    *password;
+  const char     *backend;  
+  const char      *worker;
+  const char        *rate;
+};
+
+
+static void
+parse_opt(struct options *opt, int c, char **v)
 {
-  struct event_config *config;
-  const char *levent_ver = event_get_version();  
-
   int cc;
-  struct options {
-    const char *server_addr;    
-    const char *server_port;    
-    const char  *local_addr;
-    const char  *local_port;        
-    const char    *password;
-  };
-
-  struct options o;
-  char opt;  
-
-  memset(&o, 0, sizeof(o));
   
   while (1)
     {
@@ -665,21 +688,33 @@ main(int c, char **v)
 	{
 	case 0:
 	  if (lp[opt_index].flag != 0) break;
-	case 's': o.server_addr = optarg; break;
-	case 'p': o.server_port = optarg; break;
-	case 'u': o.local_addr  = optarg; break;
-	case 'j': o.local_port  = optarg; break;
-	case 'k': o.password    = optarg; break;
+	case 's': opt->server_addr = optarg; break;
+	case 'p': opt->server_port = optarg; break;
+	case 'u': opt->local_addr  = optarg; break;
+	case 'j': opt->local_port  = optarg; break;
+	case 'k': opt->password    = optarg; break;
 	case 'l':      yes_this_is_local; break;
 	case 'v':         verbose_flag++; break;
 	case '?':               syntax(); break;
 	}
-    }
+    }  
+}
 
+
+int
+main(int c, char **v)
+{    
+  int cc;
+  char opt;    
+  struct options o;
+
+  memset(&o, 0, sizeof(o));
+  parse_opt(&o, c, v);
+  
   if (yes_this_is_local) {
     
     if (!(o.local_port && o.local_addr && o.password &&
-	  o.server_addr && o.server_port))
+	  o.server_addr && o.server_port))  
       syntax();
     
   } else { /* forward server */
@@ -688,27 +723,28 @@ main(int c, char **v)
       syntax();
     
   }
-
-  int              fsocklen, socklen, port, mode;
+  
   struct evconnlistener               *listener;  
   static struct sockaddr_storage listen_on_addr;
   static struct sockaddr_storage   forward_addr;  
   struct event                    *signal_event;
+  int                                      mode;
+  int                                      port;
+  int      socklen = sizeof(struct sockaddr_in);
+  const char  *levent_ver = event_get_version();  
   
-  memset(&listen_on_addr, 0, sizeof(listen_on_addr));
-  
-  socklen = sizeof(listen_on_addr);
+  event_set_fatal_callback(app_fatal_cb);
 
+  memset(&listen_on_addr, 0, sizeof(listen_on_addr));
   memset(&forward_addr, 0, sizeof(forward_addr));
   
-  fsocklen = sizeof(forward_addr);
-    
   base = event_base_new();
 
   if (yes_this_is_local)
     /* A server is requested running in local mode
        Server should connect to a remote server
     */
+  
     {
       if (evutil_parse_sockaddr_port(o.local_port,
 			   (struct sockaddr*)&listen_on_addr, &socklen)<0)
@@ -726,8 +762,6 @@ main(int c, char **v)
 	    syntax();
 	  
 	  sin->sin_family = AF_INET; /* TODO IPv6 */
-	  
-	  socklen = sizeof(struct sockaddr_in);
 	  
 	}
       
@@ -747,9 +781,7 @@ main(int c, char **v)
 	  if (evutil_inet_pton(AF_INET, o.server_addr, &fsin->sin_addr)<0)
 	    syntax();
 	  
-	  fsin->sin_family = AF_INET; /* TODO IPv6 */
-	  
-	  fsocklen = sizeof(struct sockaddr_in);
+	  fsin->sin_family = AF_INET; /* TODO IPv6 */	 
 	  
 	}
       
@@ -763,11 +795,11 @@ main(int c, char **v)
     }
   else
     {
+      
       /* Running as forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
 		     (struct sockaddr*)&listen_on_addr, &socklen)<0)
 	{
-	  
 	  struct sockaddr_in *sin = (struct sockaddr_in*)&listen_on_addr;
 	  
 	  port = atoi(o.server_port);
@@ -796,12 +828,10 @@ main(int c, char **v)
 
   if (!listener) {
     
-    logger_err("bind");
-    
+    logger_err("bind");  
     event_base_free(base);
     
     return 1;
-    
   }
 
   if (DEBUG == 1) logger_debug(DEBUG, "DEBUG MODE");
@@ -817,7 +847,6 @@ main(int c, char **v)
   logger_info("Libevent version: %s", levent_ver);
   
   event_base_dispatch(base);
-  
   event_base_free(base);
   
   return 0;
