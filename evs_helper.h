@@ -6,8 +6,6 @@
 #endif
 
 typedef struct socks_name_s {
-  // TAILQ_ENTRY (socks_name_s) name_next;
-
   char                   *host;
   size_t                   len; // host length
   struct bufferevent      *bev;
@@ -21,8 +19,6 @@ struct entry_s {
   struct socks_name_s *name;
 };
 
-// queue_t * init_queue(queue_t *q, size_t s);
-// void queue_insert(queue_t *, queue_t *);
 int resolve_host(socks_name_t *);
 
 #endif

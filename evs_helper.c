@@ -4,7 +4,6 @@
 #include <ws2tcip.h>
 #else
 
-#include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -13,9 +12,22 @@
 #include "evs_helper.h"
 #include "evs_log.h"
 #include "evs_internal.h"
+#include "evs_bst.h"
+
+  
+/* init dns cache */
+bst_t *dns_cache;
+
+static char * hostcpy(char *dst, char *src, size_t s);
+static bst_t * init_dns_cache(void);
 
 
-static char * hostcpy(char *, char *, size_t);
+static bst_t *
+init_dns_cache(void)
+{
+  dns_cache = new_bst((bst_cmp_t*)strcmp, NULL);
+  return dns_cache;
+}
 
 
 int
@@ -33,9 +45,9 @@ resolve_host(socks_name_t *n)
     log_err("malloc");
     return -1;
   }
-
+  
   (void) hostcpy(host, n->host, n->len);
-
+  
   log_debug(DEBUG, "resolve:%s", host);
 
   memset(&hints, 0, sizeof(hints));
