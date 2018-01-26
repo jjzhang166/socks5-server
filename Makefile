@@ -16,9 +16,9 @@ PROGRAM = esocks
 
 CC = gcc
 
-OBJ =  evs_server.o evs_log.o evs_helper.o
+OBJ =  evs_server.o evs_log.o evs_helper.o evs_bst.o
 
-SRC =  evs_log.c evs_helper.c evs_server.c 
+SRC =  evs_log.c evs_helper.c evs_server.c evs_bst.c
 
 ifeq ($(DEBUG), yes)
 	DE = -DDEBUG=1 -g -DFAST_OPEN # debug and ready for gdb and fast-open
@@ -42,8 +42,13 @@ $(PROGRAM): $(OBJ)
 	$(Q) $(CC) $(OBJ) $(LIBS) -o $@
 
 
+evs_helper.o:
+	$(Q) $(CC) $(CFLAGS) -c evs_bst.c evs_log.c
+
+evs_server.o:
+	$(Q) $(CC) $(CFLAGS) -c evs_helper.c evs_log.c
+
 .c.o:
-	$(E) "  CC    " $@
 	$(Q) $(CC) $(CFLAGS) -c $(SRC)
 
 
