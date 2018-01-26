@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <stdbool.h>
 
 #define u64 ev_uint64_t
 #define u32 ev_uint32_t

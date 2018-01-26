@@ -37,6 +37,7 @@
 #include "evs_log.h"
 #include "evs_helper.h"
 
+
 #define MAX_OUTPUT (512 * 1024)
 
 
@@ -45,6 +46,7 @@ static int yes_this_is_local;
 static int verbose_flag;
 static struct event_base *base;
 static struct evdns_base *evdns_base;
+
 
 static void syntax(void);
 static void eventcb(struct bufferevent *bev, short what, void *ctx);
@@ -789,7 +791,7 @@ main(int c, char **v)
     }
   else
     {
-
+      
       /* Running as forward server */
       if (evutil_parse_sockaddr_port(o.server_port,
 				     (struct sockaddr*)&listen_on_addr, &socklen)<0)
