@@ -25,6 +25,6 @@ main()
 
   assert(!(memcmp(buf, cpy, sizeof(buf))));  
   test_ok("decrypt");
-  
+
   return 0;
 }

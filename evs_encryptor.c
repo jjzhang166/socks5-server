@@ -12,15 +12,16 @@ pseudo_encryptor(char *buf, size_t s, const char *key, size_t key_s)
   
   dst = buf;
 
-  while(--s)
+  if (dst != NULL)
     {
-      for (i =0; i < key_s; i++)
+      while(--s)
 	{
-	  dst[s] = buf[s] ^ key[i]; /* xor operation */
+	  for (i =0; i < key_s; i++)
+	    {
+	      dst[s] = buf[s] ^ key[i]; /* xor operation */
 	  
-	  *buf = *dst;
-	  
-	  dst[s]; buf[s];
+	      *buf = *dst;	  
+	    }
 	}
     }
 }
