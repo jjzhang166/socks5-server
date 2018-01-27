@@ -1,6 +1,8 @@
 #include "../evs_internal.h"
 #include "../evs_helper.h"
+#include "../evs_bst.h"
 #include "tiny_test.h"
+
 
 char *raw_ipv4s[] = {
   "172.217.27.78", "89.1460.133234"
