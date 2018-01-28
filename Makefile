@@ -39,14 +39,8 @@ CFLAGS = -std=c99 \
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(OBJ) $(LIBS) -o $@
+	$(Q) $(CC) $(SRC) $(LIBS) -o $@
 
-
-evs_helper.o:
-	$(Q) $(CC) $(CFLAGS) -c evs_bst.c evs_log.c
-
-evs_server.o:
-	$(Q) $(CC) $(CFLAGS) -c evs_helper.c evs_log.c
 
 .c.o:
 	$(Q) $(CC) $(CFLAGS) -c $(SRC)
