@@ -38,9 +38,6 @@
 #include "evs_helper.h"
 
 
-#define MAX_OUTPUT (512 * 1024)
-
-
 static int status;
 static int yes_this_is_local;
 static int verbose_flag;
@@ -53,11 +50,11 @@ static void eventcb(struct bufferevent *bev, short what, void *ctx);
 static void acceptcb(struct evconnlistener *listener, evutil_socket_t fd,
 		     struct sockaddr *a, int slen, void *p);
 static void socks_initcb(struct bufferevent *bev, void *ctx);
-static void local_writecb(struct bufferevent *bev, void *ctx);
 static void readcb_from_target(struct bufferevent *bev, void *ctx);
 static void close_on_finished_writecb(struct bufferevent *bev, void *ctx);
 static void drained_writecb(struct bufferevent *bev, void *ctx);
 static void local_readcb(struct bufferevent *bev, void *ctx);
+static void local_writecb(struct bufferevent *bev, void *ctx);
 static void remote_readcb(struct bufferevent *bev, void *ctx);
 static void destroycb(struct bufferevent *bev);
 static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
@@ -140,10 +137,8 @@ eventcb(struct bufferevent *bev, short what, void *ctx)
          * side; close it! */
 	bufferevent_free(partner);
     }
-
     log_debug(DEBUG, "freed");
-    bufferevent_free(bev);
-    
+    bufferevent_free(bev);    
   }
 }
 
@@ -157,7 +152,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
   struct sockaddr_in sin;
   struct sockaddr_in6 sin6;
-
+  struct sockaddr_storage storage;
   /* name lookup stuff */
   socks_name_t n;
   int domlen, buflen;
@@ -173,10 +168,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   /* payload for ok message to clients */
   u8 payload[2] = {5, 0};
 
-  /* Watch out where we drain the read buffer!! 
-     We cannout proceed next callbacs til
-     have a connection.
-   */
   evbuffer_copyout(src, buf, buf_size);
 
   /* TODO: */
@@ -190,8 +181,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
     
     if (yes_this_is_local && status == SINIT)
       {
+	
 	log_debug(DEBUG, "local connect");
-
         evbuffer_drain(src, buf_size);
 	
 	if (bufferevent_write(bev, payload, 2)<0) {
@@ -202,7 +193,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  return;
 	}
 
-	bufferevent_setcb(bev, local_readcb, NULL,
+	bufferevent_setcb(bev, local_readcb, local_writecb,
 			  eventcb, partner);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);	
       }
@@ -212,9 +203,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
      */
     if (!yes_this_is_local && status == SINIT)
       {
-	/* choke bev to stop reading any data */
-	bufferevent_disable(bev, EV_READ);
-
 	switch(buf[3]) {
 
 	case IPV4:
@@ -273,11 +261,8 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  /* Extract 16 bytes address */
 	  if (evutil_inet_pton(AF_INET6, abuf, &sin6.sin6_addr) < 1)
 	    {
-	  
 	      log_err("v6: failed to resolve addr");
-
 	      destroycb(bev);
-
 	      return;
 	    }
 
@@ -287,7 +272,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 
 	  sin6.sin6_family = AF_INET6;
 	  sin6.sin6_port = htons(port);
-	  
+
 	  /* connect immediately if address is raw and legit */
 	  if (bufferevent_socket_connect(partner,
 				 (struct sockaddr*)&sin6, sizeof(sin6)) != 0)
@@ -314,15 +299,15 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  
 	  resolvecb(&n);
 
-	  /* And extract 2 bytes port as well */
-	  memcpy(portbuf, buf + buflen, 2);
-	  port = portbuf[0]<<8 | portbuf[1];
-
-	  n.sin.sin_family = AF_INET;
-	  n.sin.sin_port = htons(port);
-
 	  if (status == DNS_OK) {
 
+	    /* And extract 2 bytes port as well */
+	    memcpy(portbuf, buf + buflen, 2);
+	    port = portbuf[0]<<8 | portbuf[1];
+
+	    n.sin.sin_family = AF_INET;
+	    n.sin.sin_port = htons(port);
+	    
 	    log_debug(DEBUG, "dns_ok");
 	    
 	    evbuffer_drain(src, buf_size);
@@ -335,7 +320,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	      return;
 	      
 	    }
-	    
+
 	    log_info("* %s:%d", abuf, port);
 
 	    if (bufferevent_socket_connect(partner,
@@ -346,7 +331,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 		return;
 	      }
 
-	    status = SCONNECTED;	    
+	    status = SCONNECTED;
 	  }
 
 	  break;
@@ -361,8 +346,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    /* wait for target's response and if any data back, send it back
 	     * to client 
 	     */
-	    bufferevent_setcb(bev, remote_readcb,
-			      NULL, eventcb, partner);
+	    bufferevent_setcb(bev, remote_readcb, NULL, eventcb, partner);
 	    bufferevent_enable(bev, EV_READ|EV_WRITE);
 	  }
       }
@@ -379,11 +363,12 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 static void
 resolvecb(socks_name_t *s)
 {
-  if (resolve_host(s) != 0) {
+  if (resolve_host(s) == 0) {
+    status = DNS_OK;
+  } else {
     destroycb(s->bev);
     return;
-  }      
-  status = DNS_OK;
+  }
 }
 
 
@@ -397,22 +382,30 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
-  evbuffer_drain(src, buf_size);
   
   log_debug(DEBUG, "payload to target=%ld", buf_size);
-  
-  if (bufferevent_write(partner, buf, buf_size) <0) {
-    
-    log_err("bufferevent_write");      
-    destroycb(bev);
-    
-    return;
-  }
+  bufferevent_write(partner, buf, buf_size);
+  evbuffer_drain(src, buf_size);  
 
   /* wait for target's response and send data back to a client */
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_READ|EV_WRITE);
+}
 
+
+static void
+local_writecb(struct bufferevent *bev, void *ctx)
+{
+  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+  
+  if (status == SINIT) {
+    if (bufferevent_write(bev, payload, 10)<0) {
+      destroycb(bev);
+      return;
+    }    
+    /* choke client */
+    bufferevent_disable(bev, EV_WRITE);    
+  }
 }
 
 
@@ -435,21 +428,12 @@ local_readcb(struct bufferevent *bev, void *ctx)
 
   evbuffer_copyout(src, buf, buf_size);  
   evbuffer_drain(src, buf_size);
-
+      
   socks_cmd_e cmd = buf[1];
 
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buf[0] == SOCKS_VERSION)
-    {
-
-      if (bufferevent_write(bev, payload, 10) <0) {
-      
-	log_err("bufferevent_write");      
-	destroycb(bev);
-	return;
-	
-      }
-      
+    {      
       status = SWAIT;
       
       /* parse socks header */
@@ -466,45 +450,17 @@ local_readcb(struct bufferevent *bev, void *ctx)
 	return;
       }  
     }
-  
+
   if (bufferevent_write(partner, buf, buf_size) <0) {
-    
     log_err("bufferevent_write");      
     destroycb(bev);
-
     return;    
   }
 
   /* set callbacks and wait for server response */  
   bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
   bufferevent_enable(partner, EV_WRITE|EV_READ);
-}
-
-
-static void
-local_writecb(struct bufferevent *bev, void *ctx)
-{  
-  struct bufferevent *partner = ctx;
-  struct evbuffer *src = bufferevent_get_input(bev);
-  size_t buf_size = evbuffer_get_length(src);  
-  u8 payload[10] = {5, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-  u8 buf[buf_size];
-
-  evbuffer_copyout(src, buf, buf_size);
-  evbuffer_drain(src, buf_size);
-  
-  if (status == SINIT) {
-    
-    if (bufferevent_write(bev, payload, 10) <0) {
-      
-    log_err("bufferevent_write");      
-    destroycb(bev);
-      
-    }
-  }
-
-  /* change status SINIT to whatever status */
-  status = SWAIT;  
+  bufferevent_enable(bev, EV_WRITE);
 }
 
 
@@ -512,7 +468,7 @@ static void
 readcb_from_target(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
-  struct evbuffer *src, *dst;
+  struct evbuffer *src;
   size_t buf_size;
   
   src = bufferevent_get_input(bev);
@@ -520,38 +476,19 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   u8 buf[buf_size];
   
   if (!partner) {
-
     log_debug(DEBUG, "readcb_from_target drain");    
     evbuffer_drain(src, buf_size);
-
     return;
   }
 
   evbuffer_copyout(src, buf, buf_size);
-  evbuffer_drain(src, buf_size);
-  
+  evbuffer_drain(src, buf_size);  
   log_debug(DEBUG, "drained=%ld", buf_size);
-  
+    
   if (bufferevent_write(partner, buf, buf_size) < 0) {
-      
     log_err("bufferevent_write");      
     destroycb(bev);
-
     return;    
-  }
-
-  /* forward  */
-  dst = bufferevent_get_output(partner);
-  
-  if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
-    
-    log_debug(DEBUG, "exceeding MAX_OUTPUT %ld",
-		 evbuffer_get_length(dst));
-    
-    bufferevent_setcb(partner, NULL, drained_writecb, eventcb, bev);    
-    bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2,
- 			     MAX_OUTPUT);
-    bufferevent_disable(partner, EV_READ);
   }
 }
 
@@ -605,7 +542,6 @@ acceptcb(struct evconnlistener *listener,
 
   bufferevent_setcb(bev, socks_initcb, NULL, eventcb, partner);
   bufferevent_enable(bev, EV_READ|EV_WRITE);
-  
 }
 
 
@@ -619,8 +555,7 @@ signal_func(evutil_socket_t sig_flag, short what, void *ctx)
   log_info(
        "Caught an interupt signal; exiting cleanly in %d second(s)", sec);
   
-  event_base_loopexit(base, &delay);
-  
+  event_base_loopexit(base, &delay);  
 }
 
 
@@ -630,7 +565,7 @@ syntax(void)
   printf("Usage: esocks [OPTIONS] ...\n");
   puts("");
   printf("Options\n");
-  printf(" General options:\n");
+  printf(" Server options:\n");
   printf("  -s --server_addr  server address\n");
   printf("  -p --server_port  server port\n");  
   printf("  -u --local_addr   local address\n");
@@ -810,6 +745,7 @@ main(int c, char **v)
 	    syntax();
 
 #ifdef FAST_OPEN /* Experimental */
+	  
  	  int fd;
  	  int optval = 5;
  	  
@@ -838,19 +774,16 @@ main(int c, char **v)
 					     -1, (struct sockaddr*)&listen_on_addr,
 					     socklen);
 
-#endif /* FAST_OPEN */
-	  
+#endif /* FAST_OPEN */	  
 	}
 
       log_info("server is up and running %s:%s", 
 		  o.server_addr, o.server_port);      
     }
-  
-  if (!listener) {
-    
+
+  if (!listener) {   
     log_err("bind");  
     event_base_free(base);
-    
     return 1;
   }
 
