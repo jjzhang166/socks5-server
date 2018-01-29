@@ -6,13 +6,17 @@
 int
 main()
 {
-  char buf[] =
-    {"This is test data to be encrypted."};
+  char *buf, *cpy;
   const char key[] = "this_is_a_good_key";
-  size_t buf_len = sizeof(buf);
   size_t key_len = sizeof(key);
 
-  char cpy[buf_len];
+  buf = malloc(34 + 1);
+  cpy = malloc(34 + 1);
+  
+  strcpy(buf, "This is test data to be encrypted.");
+  strcpy(cpy, buf);
+  
+  size_t buf_len = sizeof(buf);  
   
   memcpy(cpy, buf, buf_len);
   

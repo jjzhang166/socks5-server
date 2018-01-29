@@ -8,9 +8,7 @@ static void
 pseudo_encryptor(char *buf, size_t s, const char *key, size_t key_s)
 {
   size_t i;
-  char *dst = malloc(s);
-  
-  dst = buf;
+  char *dst = buf;
 
   if (dst != NULL)
     {
@@ -20,7 +18,7 @@ pseudo_encryptor(char *buf, size_t s, const char *key, size_t key_s)
 	    {
 	      dst[s] = buf[s] ^ key[i]; /* xor operation */
 	  
-	      *buf = *dst;	  
+	      *buf = *dst; /* copy to original */
 	    }
 	}
     }
