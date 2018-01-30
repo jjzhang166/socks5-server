@@ -29,21 +29,17 @@ LIBS = -levent -levent_core
 CFLAGS = -std=c99 \
          -D_DEFAULT_SOURCE \
          -W \
-         -Wstrict-prototypes \
-         -Wmissing-prototypes \
-         -Wno-sign-compare \
-         -Wno-unused-parameter \
 	 -O2 \
 	 $(DE)
 
 
 $(PROGRAM): $(OBJ)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(SRC) $(LIBS) -o $@
+	$(Q) $(CC)  $(CFLAGS) $(SRC) $(LIBS) -o $@
 
 
 .c.o:
-	$(Q) $(CC) $(CFLAGS) -c $(SRC)
+	$(Q) $(CC) -c $(SRC)
 
 
 clean:
