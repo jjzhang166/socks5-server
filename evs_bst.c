@@ -8,9 +8,7 @@ static _Bool delete(bst_t *t, node_t **node_pptr, const void *key);
 static void * search(bst_t *t, node_t *node_ptr, const void *key);
 static node_t * detach_min(node_t **node_pptr);
 
-
 const void * get_key(const void * p) { return p; };
-
 
 static node_t *
 detach_min(node_t **node_pptr)
@@ -29,7 +27,6 @@ detach_min(node_t **node_pptr)
       return node_ptr;
     }
 }
-
 
 static _Bool
 delete(bst_t *t, node_t **node_pptr, const void *key)
@@ -63,7 +60,6 @@ delete(bst_t *t, node_t **node_pptr, const void *key)
     }
 }
 
-
 static void *
 search(bst_t *t, node_t *node_ptr, const void *key)
 {
@@ -83,7 +79,6 @@ search(bst_t *t, node_t *node_ptr, const void *key)
 	return search(t, node_ptr->right, key);
     }
 }
-
 
 static _Bool
 insert(bst_t *t, node_t **node_pptr, const void *data_p, size_t s)
@@ -144,14 +139,13 @@ new_bst(bst_cmp_t *cmp, bst_get_key_t *get)
   return tree;
 }
 
-
-const void * bst_search(bst_t *t, const void *key)
+const void
+* bst_search(bst_t *t, const void *key)
 {
   if (t == NULL || key == NULL) return NULL;
 
   return search(t, t->root, key);
 }
-
 
 _Bool
 bst_insert(bst_t *t, const void *payload, size_t s)
@@ -160,7 +154,6 @@ bst_insert(bst_t *t, const void *payload, size_t s)
     return false;
   return insert(t, &t->root, payload, s);
 }
-
 
 _Bool
 bst_delete(bst_t *t, const void *key)

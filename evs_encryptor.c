@@ -10,7 +10,7 @@ pseudo_encryptor(char *buf, size_t s, const char *key, size_t key_s)
   size_t i;
   char *dst = buf;
 
-  if (dst != NULL)
+  if (dst != NULL && key != NULL && buf != NULL)
     {
       while(--s)
 	{
@@ -24,7 +24,8 @@ pseudo_encryptor(char *buf, size_t s, const char *key, size_t key_s)
     }
 }
 
-void encryptor(char *buf, size_t s, const char *key, size_t key_s)
+void
+encryptor(char *buf, size_t s, const char *key, size_t key_s)
 {
   pseudo_encryptor(buf, s, key, key_s);
 }
