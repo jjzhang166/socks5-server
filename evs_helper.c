@@ -33,9 +33,10 @@ init_dns_cache(void)
 int
 resolve_host(socks_name_t *n)
 {  
-  struct addrinfo       hints, *res, *p;  
-  struct sockaddr_in                sin;
-  struct sockaddr_in6              sin6;
+  struct addrinfo hints, *res, *p;  
+  struct sockaddr_in *sin;
+  struct sockaddr_in6 *sin6;
+  u8 buf[128];
   char *host;
   int i;
 
@@ -48,7 +49,7 @@ resolve_host(socks_name_t *n)
   
   (void) hostcpy(host, n->host, n->len);
   
-  log_debug(DEBUG, "resolve:%s", host);
+  log_debug(DEBUG, "resolve: %s", host);
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -58,12 +59,9 @@ resolve_host(socks_name_t *n)
    *   TODO: 
    *  non-blocking lookups 
    */
-  if (getaddrinfo(host, NULL, &hints, &res) != 0) {
-
+  if (getaddrinfo((char *)host, NULL, &hints, &res) != 0) {
     log_err("host not found");
-
     free(host);
-
     return -1;
   }
 
@@ -85,24 +83,46 @@ resolve_host(socks_name_t *n)
     goto failed;
   }
 
-  for (p =res; p != NULL; p = p->ai_next) {
+  n->addrs = malloc(i * sizeof(socks_addr_t));
+
+  i = 0;
+  
+  if (n->addrs == NULL)
+    goto failed;
+
+  for (p =res; p != NULL; p =p->ai_next) {
   
     if (p->ai_family != AF_INET)
       continue;
 
-    memcpy(&n->sin, p->ai_addr, p->ai_addrlen);
+    sin =  malloc(p->ai_addrlen);
+    if (sin == NULL)
+      goto failed;
+    
+    memcpy(sin, p->ai_addr, p->ai_addrlen);
+    
+    sin->sin_port = n->port;
+    
+    n->addrs[i].sockaddr = (struct sockaddr*)sin;
+    n->addrs[i].socklen = p->ai_addrlen;
+    
+    struct sockaddr_in *s = (struct sockaddr_in*)n->addrs[i].sockaddr;
 
+    log_debug(DEBUG, "index=%d; adrr=%s; len=%ld",
+	      i, evutil_inet_ntop(AF_INET, &s->sin_addr, buf,
+				  sizeof(buf)), sizeof(n->addrs)/sizeof(n->addrs[0]));
+    i++;
   }
 
-#ifdef SOCKS_HAVE_INET6
-  for (p =res; p != NULL; p = p->ai_next) {
-    
-    if (p->ai_family != AF_INET6)
-      continue;
-    
-    memcpy(&n->sin6, p->ai_addr, p->ai_addrlen);
-  }
-#endif
+// #ifdef SOCKS_HAVE_INET6
+//   for (p =res; p != NULL; p = p->ai_next) {
+// 
+//     if (p->ai_family != AF_INET6)
+//       continue;
+//     
+//     memcpy(&n->sin6, p->ai_addr, p->ai_addrlen);
+//   }
+// #endif
 
   freeaddrinfo(res);  
   return 0;
