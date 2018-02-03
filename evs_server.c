@@ -62,7 +62,7 @@ static void signal_func(evutil_socket_t sig_flag, short what, void *ctx);
 static void resolvecb(socks_name_t *);
 static void app_fatal_cb(int err);
 static void internal_logcb(int sev, const char *msg);
-
+static void remote_writecb(struct bufferevent *bev, void *ctx);
 
 static void
 internal_logcb(int sev, const char *msg)
@@ -224,8 +224,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	    {
 	      log_err("connect: failed to connect");
 	      destroycb(bev);
-	      return;	      
+	      return;
 	    }
+	  
 	  log_debug(DEBUG, "v4 connect immediate");
 	  status = SCONNECTED;
 	  
@@ -278,41 +279,41 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  n.host = buf + 5;
 	  n.len = domlen;
 	  n.bev = bev;
-	  
+	  n.family = AF_INET;
+
 	  resolvecb(&n);
 
 	  if (status == DNS_OK) {
-
-	    /* extract 2 bytes port as well */
-	    memcpy(portbuf, buf + buflen, 2);
-	    port = portbuf[0]<<8 | portbuf[1];
-
-	    n.family = AF_INET;
-	    n.port = htons(port);
 	    
 	    log_debug(DEBUG, "dns_ok");
 	    
 	    evbuffer_drain(src, buf_size);
-	    
-	      struct sockaddr_in *s = (struct sockaddr_in*)&n.addrs->sockaddr[0];
 	      
-	      if (evutil_inet_ntop(AF_INET, &s->sin_addr, abuf, sizeof(abuf))
+	    /* extract 2 bytes port */
+	    memcpy(portbuf, buf + buflen, 2);
+	    port = portbuf[0]<<8 | portbuf[1];
+	      
+	    n.sin.sin_family = AF_INET;
+	    n.sin.sin_port = htons(port);
+	  
+	    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&n.sin.sin_addr,
+				 abuf, sizeof(abuf))
 		== NULL) {
 	      log_err("failed to resolve host");
 	      destroycb(bev);
-	      return;
-	      
+	      return;	      
 	    }
-
-	    log_info("* %s:%d", abuf, port);
-
-	    if (bufferevent_socket_connect(partner, &n.addrs->sockaddr[0], sizeof(s)) != 0)
+	  
+	    log_info("connecting %s:%d", abuf, port);
+	  
+	    if (bufferevent_socket_connect(partner,
+	  				   (struct sockaddr*)&n.sin, sizeof(sin)) != 0)
 	      {
-		log_err("connect: failed to connect");
-		destroycb(bev);
-		return;
+	  	log_err("connect: failed to connect");
+	  	destroycb(bev);
+	  	return;
 	      }
-
+	  
 	    status = SCONNECTED;
 	  }
 
@@ -353,6 +354,13 @@ resolvecb(socks_name_t *s)
 }
 
 static void
+remote_writecb(struct bufferevent *bev, void *ctx)
+{
+  if (status == SCONNECTED)
+    bufferevent_enable(bev, EV_WRITE);
+}
+
+static void
 remote_readcb(struct bufferevent *bev, void *ctx)
 {
   struct bufferevent *partner = ctx;
@@ -362,16 +370,15 @@ remote_readcb(struct bufferevent *bev, void *ctx)
   u8 buf[buf_size];
 
   evbuffer_copyout(src, buf, buf_size);  
+  evbuffer_drain(src, buf_size);
   
   log_debug(DEBUG, "payload to target=%ld", buf_size);
   bufferevent_write(partner, buf, buf_size);
-  evbuffer_drain(src, buf_size);  
 
   /* wait for target's response and send data back to a client */
-  bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
+  bufferevent_setcb(partner, readcb_from_target, remote_writecb, eventcb, bev);
   bufferevent_enable(partner, EV_READ|EV_WRITE);
 }
-
 
 static void
 local_writecb(struct bufferevent *bev, void *ctx)
@@ -382,9 +389,9 @@ local_writecb(struct bufferevent *bev, void *ctx)
     if (bufferevent_write(bev, payload, 10)<0) {
       destroycb(bev);
       return;
-    }    
+    }
     /* choke client */
-    bufferevent_disable(bev, EV_WRITE);    
+    bufferevent_disable(bev, EV_WRITE);        
   }
 }
 
@@ -406,7 +413,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
   evbuffer_drain(src, buf_size);
       
   socks_cmd_e cmd = buf[1];
-
+    
   /* Check if version is correct and status is equal to INIT */
   if (status == SINIT && buf[0] == SOCKS_VERSION)
     {      
@@ -434,7 +441,7 @@ local_readcb(struct bufferevent *bev, void *ctx)
   }
 
   /* set callbacks and wait for server response */  
-  bufferevent_setcb(partner, readcb_from_target, NULL, eventcb, bev);
+  bufferevent_setcb(partner, readcb_from_target, remote_writecb, eventcb, bev);
   bufferevent_enable(partner, EV_WRITE|EV_READ);
   bufferevent_enable(bev, EV_WRITE);
 }
@@ -449,9 +456,9 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   size_t buf_size;
   
   src = bufferevent_get_input(bev);
-  buf_size  = evbuffer_get_length(src);
+  buf_size = evbuffer_get_length(src);
   u8 buf[buf_size];
-  
+
   if (!partner) {
     log_debug(DEBUG, "readcb_from_target drain");    
     evbuffer_drain(src, buf_size);
@@ -459,7 +466,8 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   }
 
   evbuffer_copyout(src, buf, buf_size);
-  evbuffer_drain(src, buf_size);  
+  evbuffer_drain(src, buf_size);
+  
   log_debug(DEBUG, "drained=%ld", buf_size);
 
   // encryptor(buf, buf_size, secret_key, sizeof(secret_key));
@@ -469,6 +477,9 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
     destroycb(bev);
     return;    
   }
+
+  // choke
+  bufferevent_disable(bev, EV_WRITE);
   
   dst = bufferevent_get_output(partner);
   if (evbuffer_get_length(dst) >= MAX_OUTPUT) {
