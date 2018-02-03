@@ -22,9 +22,8 @@ typedef struct socks_name_s {
   socks_addr_t          *addrs;
   int                   family;
   struct bufferevent      *bev;
-  struct sockaddr_in      *sin;
-
-#if (SOCKS_HAVE_INET6)  
+  struct sockaddr_in      sin;
+#if (SOCKS_HAVE_INET6)
   struct sockaddr_in6    sin6;
 #endif  
 
