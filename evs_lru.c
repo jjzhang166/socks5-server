@@ -25,22 +25,28 @@ init_lru(void *data_p, size_t size)
 _Bool
 lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s)
 {
-  lru_node_t *ptr = *node_pptr; /* current */
+  lru_node_t *ptr = *node_pptr,  /* current */
+    *prev = ptr;
   
-  if (ptr == NULL)
+  for (;;)
     {
-      ptr = malloc(sizeof(ptr) + s);
-      if (ptr != NULL)
+      ptr = ptr->next;
+      if (ptr == NULL)
 	{
-	  ptr->next = NULL;
-	  ptr->prev = *node_pptr;
-	  ptr->payload_ptr = data_p;
-	  *node_pptr = ptr; /* swap */
-	  return true;
+	  ptr = malloc(sizeof(ptr) + s);
+	  if (ptr != NULL)
+	    {
+	      ptr->next = NULL;
+	      ptr->prev = prev;
+	      prev->next = ptr;
+	      ptr->payload_ptr = data_p;
+	      *node_pptr = ptr;
+	      return true;
+	    }
+	  break;
 	}
-      return false;
     }
-  return lru_insert_left(&ptr->next, data_p, s);
+  return false;
 }
 
 /* Append */
@@ -89,33 +95,50 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
   lru_node_t *ptr = *node_pptr,
     *head = lru_get_head(node_pptr),
     *tail = lru_get_tail(node_pptr);
-
-  if (ptr->next != NULL && ptr->prev != NULL)
-    log_info("middle");
   
   if (ptr != NULL)
     {
       while (ptr != NULL)
 	{
+
 	  if (func(key, get_key(ptr->payload_ptr)) == 0)
 	    {
-	      lru_node_t *cpy = *node_pptr;
+	      lru_node_t *cpy = ptr;
 	      
-	      if (tail != NULL)
+	      if (func(key, get_key(head->payload_ptr)) == 0) /* the key hits head */
+		{
+		  return ptr;
+		}
+	      
+	      if (func(key, get_key(tail->payload_ptr)) == 0) /* the key hits tail */
 		{
 		  log_info("tail");		  
-		  lru_node_t *next = ptr->next;
-		  next->prev = NULL;
-		}	      
-	      assert(lru_insert_left(node_pptr, ptr->payload_ptr,
-				     sizeof(ptr->payload_ptr)) == true);
-	      memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));
-	      cpy->next = NULL;
-	      cpy->prev = head;
+		  assert(lru_insert_left(node_pptr, ptr->payload_ptr,
+					 sizeof(ptr->payload_ptr)) != false);
+		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));		  
+		  cpy->prev = head;
+		  cpy->next = NULL;		  
+		  // ptr->prev = NULL;
+		  tail->prev = NULL;
+		  tail = ptr->next;
+		}
+	      else
+		{
+		  assert(ptr->prev != NULL);		  
+		  assert(ptr->next != NULL);
+		  assert(lru_insert_left(node_pptr, ptr->payload_ptr,
+					 sizeof(ptr->payload_ptr)) == true);
+		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));
+		  ptr->next->prev = ptr->prev;
+		  ptr->prev->next = ptr->next;
+		  cpy->next = NULL;
+		  cpy->prev = head;
+		  head->next = cpy;
+		}
 	      free(ptr);
 	      return cpy;
 	    }
-	  ptr = ptr->next;
+	  ptr = ptr->prev;
 	}
       return NULL;
     }
