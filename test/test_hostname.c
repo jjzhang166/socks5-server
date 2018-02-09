@@ -3,7 +3,6 @@
 #include "../evs_bst.h"
 #include "tiny_test.h"
 
-
 char *raw_ipv4s[] = {
   "172.217.27.78", "89.1460.133234"
 };
@@ -28,35 +27,16 @@ char *raw_ipv6s[] = {
 void
 test_resolve_name()
 {
-  struct sockaddr *sa;
-  socks_name_t t;  
+  socks_name_t t;
   size_t i;
   char buf[128];
-
-  memset(&t, 0, sizeof(t));
-
-  for (i =0; i < sizeof(hosts)/sizeof(hosts[0]); i++) {
-    
-    t.host = hosts[i].host;
-    t.len = hosts[i].s;
-    resolve_host(&t);
-    
-    if (evutil_inet_ntop(AF_INET,
-	    (struct sockaddr_in*)&t.sin.sin_addr, buf, sizeof(buf))
-	== NULL)
-      test_failed("resolve_host");
-
-    test_ok("resolve_host => %s", buf);
-    
-#if SOCKS_HAVE_INET6
-    if (evutil_inet_ntop(AF_INET6,
-	  (struct sockaddr_in*)&t.sin6.sin6_addr, buf, sizeof(buf))
-	== NULL)
-      test_failed("resolve_host");    
-   
-    test_ok("resolve_host => %s", buf);
-#endif    
-  }  
+  
+  t.host = "tools.ietf.org";
+  t.len = strlen("tools.ietf.org");
+  (void)resolve_host(&t);
+  assert(evutil_inet_ntop(AF_INET, (struct sockaddr*)&t.sin.sin_addr,
+			  buf, sizeof(buf)) != NULL);
+  test_ok("resolve_host");
 }
 
 int
