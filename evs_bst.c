@@ -92,13 +92,9 @@ insert(bst_t *t, node_t **node_pptr, const void *data_p, size_t s)
       if (node_ptr != NULL)
 	{
 	  node_ptr->left = NULL;
-	  
 	  node_ptr->right = NULL;
-	  
 	  memcpy(node_ptr->payload, data_p, s);
-	  
 	  *node_pptr = node_ptr;
-	  
 	  return true;
 	}
       else

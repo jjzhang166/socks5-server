@@ -281,7 +281,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  n.bev = bev;
 	  n.family = AF_INET;
 
-	  resolvecb(&n);
+	  (void)resolvecb(&n);
 
 	  if (status == DNS_OK) {
 	    
@@ -301,11 +301,9 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 		== NULL) {
 	      log_err("failed to resolve host");
 	      destroycb(bev);
-	      return;	      
+	      return;
 	    }
-	  
 	    log_info("connecting %s:%d", abuf, port);
-	  
 	    if (bufferevent_socket_connect(partner,
 	  				   (struct sockaddr*)&n.sin, sizeof(sin)) != 0)
 	      {
@@ -313,7 +311,6 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  	destroycb(bev);
 	  	return;
 	      }
-	  
 	    status = SCONNECTED;
 	  }
 

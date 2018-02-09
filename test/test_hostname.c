@@ -31,8 +31,8 @@ test_resolve_name()
   size_t i;
   char buf[128];
   
-  t.host = "tools.ietf.org";
-  t.len = strlen("tools.ietf.org");
+  t.host = "google.com";
+  t.len = strlen("google.com");
   (void)resolve_host(&t);
   assert(evutil_inet_ntop(AF_INET, (struct sockaddr*)&t.sin.sin_addr,
 			  buf, sizeof(buf)) != NULL);
