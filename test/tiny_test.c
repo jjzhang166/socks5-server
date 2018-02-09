@@ -1,6 +1,13 @@
 #include "../evs_internal.h"
 #include "tiny_test.h"
 
+void block(int val)
+{
+  time_t now;
+  now = time(0) + val;
+  while(time(0) < now);
+}
+
 void
 announce(const char *name, ...)
 {
