@@ -14,6 +14,7 @@ lru_node_t *
 init_lru(void *data_p, size_t size)
 {
   lru_node_t *node = NULL;
+  time_t now = time(&now);
   
   node = malloc(sizeof(node) + size);
   if (node != NULL)
@@ -21,28 +22,33 @@ init_lru(void *data_p, size_t size)
       node->next = NULL;
       node->prev = NULL;
       node->payload_ptr = data_p;
+      node->start = now;
     }
+  
   return node;
 }
 
+/* Timer also starts */
 _Bool
 lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s)
 {
   lru_node_t *ptr = *node_pptr,  /* current */
     *prev = ptr, *head = lru_get_head(node_pptr);
+  time_t now = time(&now);
   
   for (;;)
     {
       ptr = ptr->next;
       if (ptr == NULL)
 	{
-	  ptr = malloc(sizeof(ptr) + s);
+	  ptr = malloc(sizeof(ptr) + s + sizeof(time_t));
 	  if (ptr != NULL)
 	    {
 	      ptr->next = NULL;
 	      ptr->prev = *node_pptr;// head
 	      prev->next = ptr;
 	      ptr->payload_ptr = data_p;
+	      ptr->start = now;
 	      *node_pptr = ptr;
 	      return true;
 	    }
@@ -50,19 +56,6 @@ lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s)
 	}
     }
   return false;
-}
-
-void
-purge_all(lru_node_t **node_pptr)
-{
-  lru_node_t *ptr = *node_pptr;
-
-  while(ptr != NULL)
-    {
-      log_debug(DEBUG, "removeing ... %s", (const char*)ptr->payload_ptr->key);      
-      ptr = ptr->prev; //backward til nil
-      free(ptr);
-    }
 }
 
 lru_node_t *
@@ -78,6 +71,7 @@ lru_node_t *
 lru_get_tail(lru_node_t **node_pptr)
 {
   lru_node_t *ptr = *node_pptr;
+
   if (ptr->prev != NULL)
     return lru_get_tail(&ptr->prev);
   return ptr;
@@ -90,7 +84,8 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
   lru_node_t *ptr = *node_pptr,
     *head = lru_get_head(node_pptr),
     *tail = lru_get_tail(node_pptr);
-
+  time_t now = time(&now);
+  
   if (ptr != NULL)
     {
       while (ptr != NULL)
@@ -102,12 +97,14 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 	      
 	      if (func(key, lru_get_key(head->payload_ptr)) == 0) /* the key hits head */
 		{
+		  ptr->start = now; // reinitialize timer
 		  return ptr;
 		}
 	      
 	      if (func(key, lru_get_key(tail->payload_ptr)) == 0) /* the key hits tail */
 		{
 		  tail->next->prev = NULL;
+		  tail = tail->next;
 		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr)); 
 		  cpy->prev = head;
 		  cpy->next = NULL;
@@ -136,4 +133,45 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
     }
   else /* ptr is NULL */
     return NULL;
+}
+
+void
+purge_all(lru_node_t **node_pptr)
+{
+  lru_node_t *ptr = *node_pptr;
+  
+  while(ptr != NULL)
+    {
+      log_debug(DEBUG, "removeing ... %s", (const char*)ptr->payload_ptr->key);      
+      ptr = ptr->prev; //backward til nil
+      free(ptr);
+    }
+}
+
+void
+lru_remove_oldest(lru_node_t **node_pptr, int timeout)
+{
+  lru_node_t *ptr = *node_pptr,
+    *tail = lru_get_tail(node_pptr),
+    *next = tail->next;
+  time_t now;
+  
+  time(&now);
+  
+  while(1)
+    {
+      if (now - tail->start <= timeout)
+	{
+	  if (tail != NULL)
+	    {
+	      tail = next;
+	      next->prev = NULL;
+	      log_debug(DEBUG, "removed \"%s\"", (char*)tail->payload_ptr->key);	      
+	      free(tail);
+	      tail = NULL;
+	      break;
+	    }
+	}
+      break;
+    }
 }

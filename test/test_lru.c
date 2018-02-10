@@ -7,22 +7,22 @@ main()
 {
   struct payload_s p1, p2, p3, p4;
   lru_node_t *node, *ret;
+  time_t now;
 
   p1.key = (const char*)"key";
   p1.val = (char*)"value";
+  
   node = init_lru(&p1, sizeof(p1));
 
   assert(node != NULL);
-
-  assert(
-         strcmp("key", lru_get_head(&node)->payload_ptr->key)
-         == 0);
-
+  
+  time(&now);  
+  
   p2.key = (const char*)"what";
   p2.val = (char*)"baz";
   assert(lru_insert_left(&node, &p2, sizeof(p2)) != false);
+  
   test_ok("insert \"%s\" to left", (const char*)node->payload_ptr->key);
-  test_ok("prev key is \"%s\"", (const char*)node->prev->payload_ptr->key);
 
   assert(strcmp("what", lru_get_head(&node)->payload_ptr->key) == 0);
 
@@ -37,6 +37,9 @@ main()
 
   assert(strcmp(lru_get_node(&node, "doo",
                              (lru_cmp_func*)strcmp)->payload_ptr->key, "doo") == 0);
+
+  block(1);
+  
   assert(strcmp(lru_get_node(&node, "what",
                              (lru_cmp_func*)strcmp)->payload_ptr->key, "what") == 0);
   assert(strcmp(lru_get_node(&node, "key",
@@ -45,8 +48,12 @@ main()
   assert(strcmp(lru_get_head(&node)->payload_ptr->key, "key") == 0);
   
   assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "doo") == 0);
+  
+  lru_remove_oldest(&node, 2);
 
-  purge_all(&node);
+  assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "what") == 0);
+ 
+  //purge_all(&node);
   
   return 0;
 }
