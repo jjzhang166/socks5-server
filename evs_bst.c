@@ -158,7 +158,3 @@ bst_delete(bst_t *t, const void *key)
 
   return delete(t, &t->root, key);
 }
-
-void bst_swap(void)
-{
-}
