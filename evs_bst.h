@@ -7,7 +7,7 @@ typedef struct node_s node_t;
 struct node_s {
   struct node_s *left, *right;
   struct socks_name_s *name;
-  char *payload;
+  char payload[];
 };
 
 typedef const void *bst_get_key_t(const void *);

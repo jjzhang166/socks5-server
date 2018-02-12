@@ -20,7 +20,6 @@
 #define SOCKS_LOG_WARN   3
 #define SOCKS_LOG_ERROR  4 
 
-
 void log_errx(int eval, const char *fmt, ...)S_NO_RETURN;
 void log_err(const char *fmt, ...) S_CHECK_FMT(1,2);
 void log_warn(const char *fmt, ...) S_CHECK_FMT(1,2);
