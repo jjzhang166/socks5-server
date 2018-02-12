@@ -37,8 +37,6 @@ main()
 
   assert(strcmp(lru_get_node(&node, "doo",
                              (lru_cmp_func*)strcmp)->payload_ptr->key, "doo") == 0);
-
-  block(1);
   
   assert(strcmp(lru_get_node(&node, "what",
                              (lru_cmp_func*)strcmp)->payload_ptr->key, "what") == 0);
@@ -48,12 +46,15 @@ main()
   assert(strcmp(lru_get_head(&node)->payload_ptr->key, "key") == 0);
   
   assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "doo") == 0);
-  
-  lru_remove_oldest(&node, 2);
 
-  assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "what") == 0);
- 
-  //purge_all(&node);
+  block(1);
+  lru_remove_oldest(&node, 2);
+  block(1);
+  lru_remove_oldest(&node, 2);  
   
+  assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "key") == 0);
+
+  purge_all(&node);
+
   return 0;
 }
