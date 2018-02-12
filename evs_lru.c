@@ -16,13 +16,14 @@ init_lru(void *data_p, size_t size)
   lru_node_t *node = NULL;
   time_t now = time(&now);
   
-  node = malloc(sizeof(node) + size);
+  node = malloc(sizeof(node) + size + sizeof(time_t) + sizeof(int));
   if (node != NULL)
     {
       node->next = NULL;
       node->prev = NULL;
       node->payload_ptr = data_p;
       node->start = now;
+      node->struct_ref = 1;
     }
   
   return node;
@@ -41,7 +42,7 @@ lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s)
       ptr = ptr->next;
       if (ptr == NULL)
 	{
-	  ptr = malloc(sizeof(ptr) + s + sizeof(time_t));
+	  ptr = malloc(sizeof(ptr) + s + sizeof(time_t) + sizeof(int));
 	  if (ptr != NULL)
 	    {
 	      ptr->next = NULL;
@@ -49,6 +50,7 @@ lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s)
 	      prev->next = ptr;
 	      ptr->payload_ptr = data_p;
 	      ptr->start = now;
+	      ptr->struct_ref++;
 	      *node_pptr = ptr;
 	      return true;
 	    }
@@ -164,11 +166,9 @@ lru_remove_oldest(lru_node_t **node_pptr, int timeout)
 	{
 	  if (tail != NULL)
 	    {
-	      tail = next;
 	      next->prev = NULL;
-	      log_debug(DEBUG, "removed \"%s\"", (char*)tail->payload_ptr->key);	      
+	      log_debug(DEBUG, "removed \"%s\"", (char*)tail->payload_ptr->key);
 	      free(tail);
-	      tail = NULL;
 	      break;
 	    }
 	}

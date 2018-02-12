@@ -16,10 +16,14 @@ struct payload_s {
 typedef struct lru_node_s lru_node_t;
 
 struct lru_node_s {
+  /* reference count */
+  int struct_ref;
+  /* insertion time */
+  time_t start;
+  struct payload_s *payload_ptr;
+  /* Used to maintain linked list */  
   struct lru_node_s *next;  
   struct lru_node_s *prev;
-  struct payload_s *payload_ptr;
-  time_t start;
 };
 
 const void * lru_get_key(payload_t *p);
