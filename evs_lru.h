@@ -20,20 +20,20 @@ struct lru_node_s {
   int struct_ref;
   /* insertion time */
   time_t start;
-  struct payload_s *payload_ptr;
+  const char *key;
+  void *payload_ptr;
   /* Used to maintain linked list */  
   struct lru_node_s *next;  
   struct lru_node_s *prev;
 };
 
-const void * lru_get_key(payload_t *p);
+const char * lru_get_key(lru_node_t *p);
 void purge_all(lru_node_t **node_pptr);
-_Bool lru_insert_left(lru_node_t **node_pptr, void *data_p, size_t s);
+_Bool lru_insert_left(lru_node_t **node_pptr, const char *key, void *data_p, size_t s);
 /* wait for x nanosecond */
 void lru_remove_oldest(lru_node_t **node_pptr, int timeout);
-lru_node_t * init_lru(void *data_p, size_t size);
+lru_node_t * init_lru(void);
 lru_node_t * lru_get_node(lru_node_t **node, void *key, lru_cmp_func *);
 lru_node_t *lru_get_head(lru_node_t **node_pptr);
 lru_node_t *lru_get_tail(lru_node_t **node_pptr);
-lru_node_t *init_lru_(void);
 #endif
