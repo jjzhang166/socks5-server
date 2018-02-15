@@ -6,54 +6,58 @@
 #include "evs_log.h"
 
 static lru_node_t *get_tail(lru_node_t **node_pptr);
+static lru_node_t *get_head(lru_node_t **node_pptr);
+static lru_node_t *get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func);
 const char * lru_get_key(lru_node_t *p) { return p->key; };
 
 lru_node_t *
 init_lru(void)
 {
-  lru_node_t *node;
   time_t now = time(&now);
+  lru_node_t *node_ptr;
 
-  node = (lru_node_t*)malloc(2 * sizeof(node) + sizeof(payload_t*) + sizeof(const char*)
-			     + sizeof(time_t) + sizeof(int));
-  
-  if (node != NULL)
+  node_ptr = (lru_node_t*)malloc(2 * sizeof(node_ptr)
+				 + sizeof(payload_t*) + sizeof(const char*)
+			     + sizeof(time_t) + sizeof(int));  
+  if (node_ptr != NULL)
     {
-      node->next = NULL;
-      node->prev = NULL;
+      node_ptr->next = NULL;
+      node_ptr->prev = NULL;
     }
   
-  return node;
+  return node_ptr;
 }
 
 /* Timer also starts */
 _Bool
 lru_insert_left(lru_node_t **node_pptr, const char *key, void *data_p, size_t s)
 {
-  lru_node_t *ptr = *node_pptr,  /* current */
-    *prev = ptr, *head = lru_get_head(node_pptr);
+  lru_node_t *ptr = *node_pptr, *head = ptr;
   time_t now = time(&now);
-  
-  for (;;)
+
+  if (ptr != NULL)
     {
-      ptr = ptr->next;
-      if (ptr == NULL)
+      for (;;)
 	{
-	  ptr = (lru_node_t*)malloc(2 * sizeof(ptr) + sizeof(const char*) +
-				    s + sizeof(now) + sizeof(int));
-	  if (ptr != NULL)
+	  ptr = ptr->next;
+	  if (ptr == NULL)
 	    {
-	      ptr->key = key;
-	      ptr->next = NULL;
-	      ptr->prev = *node_pptr;// head
-	      prev->next = ptr;
-	      ptr->payload_ptr = data_p;
-	      ptr->start = now;
-	      ptr->struct_ref++;
-	      *node_pptr = ptr;
-	      return true;
+	      ptr = (lru_node_t*)malloc(2 * sizeof(ptr) + sizeof(const char*) +
+					s + sizeof(now) + sizeof(int));
+	      if (ptr != NULL)
+		{
+		  ptr->key = key;
+		  ptr->next = NULL;
+		  ptr->prev = *node_pptr; // head
+		  head->next = ptr;
+		  ptr->payload_ptr = data_p;
+		  ptr->start = now;
+		  ptr->struct_ref++;
+		  *node_pptr = ptr; // swap
+		  return true;
+		}
+	      break;
 	    }
-	  break;
 	}
     }
   return false;
@@ -63,9 +67,17 @@ lru_node_t *
 lru_get_head(lru_node_t **node_pptr)
 {
   lru_node_t *ptr = *node_pptr;
+  if (ptr != NULL)
+    return get_head(&ptr);
+}
+
+static lru_node_t *
+get_head(lru_node_t **node_pptr) // head == *node_pptr
+{
+  lru_node_t *ptr = *node_pptr;
   if (ptr->next != NULL)
     return lru_get_head(&ptr->next);
-  return ptr;
+  return ptr;  
 }
 
 static lru_node_t *
@@ -89,15 +101,23 @@ lru_get_tail(lru_node_t **node_pptr)
   return node->next;
 }
 
-/* Pop node and insert it to head */
 lru_node_t *
 lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 {
-  lru_node_t *ptr = *node_pptr,
-    *head = lru_get_head(node_pptr),
-    *tail = lru_get_tail(node_pptr);
+  lru_node_t *ptr = *node_pptr;
+  if (*node_pptr != NULL && lru_get_key(ptr) != NULL)
+    return get_node(node_pptr, key, func);
+  return NULL;
+}
+
+/* Pop node and insert it to head */
+static lru_node_t *
+get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
+{
+  lru_node_t *ptr = *node_pptr, *head = ptr,
+    *tail = lru_get_tail(node_pptr);  
   time_t now = time(&now);
-  
+
   if (ptr != NULL)
     {
       while (ptr != NULL)
@@ -110,8 +130,7 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 		{
 		  ptr->start = now; // reinitialize timer
 		  return ptr;
-		}
-	      
+		}	    
 	      if (func(key, lru_get_key(tail)) == 0) /* the key hits tail */
 		{
 		  tail->next->prev = NULL;
@@ -126,11 +145,11 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 		{
 		  assert(ptr->prev != NULL);		  
 		  assert(ptr->next != NULL);
-		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));
 		  ptr->next->prev = ptr->prev;
 		  ptr->prev->next = ptr->next;
 		  cpy->next = NULL;
 		  cpy->prev = head;
+		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));
 		  head->next = cpy;
 		  assert(lru_insert_left(node_pptr, key, ptr->payload_ptr,
 					 sizeof(ptr->payload_ptr)) == true);		  
@@ -138,6 +157,8 @@ lru_get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 	      free(ptr);
 	      return cpy;
 	    }
+	  else // doesn't exist
+	    return NULL;
 	  ptr = ptr->prev;
 	}
       return NULL;
@@ -156,6 +177,7 @@ purge_all(lru_node_t **node_pptr)
       log_debug(DEBUG, "removeing ... %s", (const char*)ptr->key);
       ptr = ptr->prev; //backward til nil
       free(ptr);
+      ptr = NULL;
     }
 }
 

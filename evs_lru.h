@@ -22,6 +22,7 @@ struct lru_node_s {
   time_t start;
   const char *key;
   void *payload_ptr;
+  //payload_t *payload_ptr;
   /* Used to maintain linked list */  
   struct lru_node_s *next;  
   struct lru_node_s *prev;
