@@ -2,6 +2,7 @@
 #define EVS_LRU_H
 
 #include <sys/time.h>
+#include <sys/socket.h>
 
 typedef int lru_cmp_func(const void *, const void *);
 typedef int lru_get_key_func(void *);
