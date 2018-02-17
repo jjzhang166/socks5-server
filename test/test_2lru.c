@@ -2,17 +2,17 @@
 #include "../evs_lru.h"
 #include "tiny_test.h"
 
-int
-main()
+void
+test1()
 {
   struct payload_s p;
-  lru_node_t *node, *ret;
+  lru_node_t *node;
   time_t now;
 
-  p.key = (const char*)"key";
-  p.val = (char*)"value";
-
   node = init_lru();
+
+  p.key = (const char*)"key";
+  p.val = (char*)"value";  
   assert(node != NULL);
   
   if (lru_insert_left(&node, "first", &p, sizeof(p)))
@@ -32,10 +32,46 @@ main()
   lru_node_t *tail = lru_get_tail(&node);
   assert(strcmp(head->key, "second") == 0);
   assert(strcmp(tail->key, "first") == 0);
-
-  block(2);
-  lru_remove_oldest(&node, 1);
-  purge_all(&node);
   
+  // Key doesn't exit, so returns NULL.
+  assert(lru_get_node(&node, "bar", (lru_cmp_func*)strcmp) == NULL);
+  
+  purge_all(&node);
+}
+
+lru_node_t *node_ptr;
+
+static void *
+create_node()
+{
+  node_ptr = init_lru();
+  return (void*)node_ptr;
+}
+
+static void
+insert(lru_node_t **node, const char *key, payload_t *p)
+{
+  assert(lru_insert_left(node, key, p, sizeof(p)));  
+}
+
+void
+test2()
+{
+  struct payload_s p;
+  memset(&p, 0, sizeof(p));
+  
+  p.key = "www";
+  p.val = "wwvalue";
+  insert(&node_ptr, "a", &p);  
+  insert(&node_ptr, "f", &p);
+  insert(&node_ptr, "z", &p);
+  insert(&node_ptr, "g", &p);
+  insert(&node_ptr, "e", &p);
+}
+
+int main() {
+  create_node();
+  test2();
+  purge_all(&node_ptr);  
   return 0;
 }

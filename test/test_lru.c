@@ -47,14 +47,14 @@ main()
   
   assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "doo") == 0);
 
-  block(1);
-  lru_remove_oldest(&node, 2);
-  block(1);
-  lru_remove_oldest(&node, 2);  
+  block(2);
+  lru_remove_oldest(&node, 1);
   
-  assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "key") == 0);
-
+  assert(strcmp(lru_get_tail(&node)->payload_ptr->key, "doo") == 0);
+  
   purge_all(&node);
-
+  
+  test_ok("purge_all");
+  
   return 0;
 }
