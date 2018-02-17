@@ -6,6 +6,7 @@
 #endif
 
 #include "evs_internal.h"
+#include "evs_lru.h"
 #include <sys/socket.h>
 
 
@@ -35,6 +36,5 @@ struct entry_s {
 };
 
 
-int resolve_host(socks_name_t *);
-
+int resolve_host(socks_name_t *, lru_node_t **);
 #endif

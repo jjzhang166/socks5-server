@@ -43,6 +43,11 @@ lru_insert_left(lru_node_t **node_pptr, const char *key, void *data_p, size_t s)
   lru_node_t *ptr = *node_pptr, *head = *node_pptr;
   time_t now = time(&now);
 
+  /* Check if we already have the key entropy */
+  if (lru_get_node(node_pptr, (void*)key, (lru_cmp_func*)strcmp) != NULL) {
+    return true;
+  }
+  
   if (ptr != NULL)
     {
       for (;;)
@@ -92,7 +97,8 @@ static lru_node_t *
 get_tail(lru_node_t **node_pptr)
 {
   lru_node_t *ptr = *node_pptr;
-  
+
+  log_debug(DEBUG, "stack=%s", ptr->key);
   if (ptr->prev != NULL)
     return get_tail(&ptr->prev);
   return ptr;
@@ -106,7 +112,7 @@ lru_get_tail(lru_node_t **node_pptr)
   if (*node_pptr != NULL)
     node = get_tail(node_pptr);
   
-  return node->next;
+  return (node == NULL) ? NULL : node->next;
 }
 
 lru_node_t *
@@ -133,7 +139,7 @@ get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 	  if (func(key, lru_get_key(ptr)) == 0)
 	    {
 	      lru_node_t *cpy = ptr;
-	      
+	     
 	      if (func(key, lru_get_key(head)) == 0) /* the key hits head */
 		{
 		  ptr->start = now; // reinitialize timer
@@ -142,12 +148,9 @@ get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 	      if (func(key, lru_get_key(tail)) == 0) /* the key hits tail */
 		{
 		  tail->next->prev = NULL;
-		  tail = tail->next;
 		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr)); 
 		  cpy->prev = head;
 		  cpy->next = NULL;
-		  assert(lru_insert_left(node_pptr, key, ptr->payload_ptr,
-					 sizeof(ptr->payload_ptr)) != false);		  
 		}
 	      else
 		{
@@ -159,10 +162,7 @@ get_node(lru_node_t **node_pptr, void *key, lru_cmp_func *func)
 		  cpy->prev = head;
 		  memcpy(cpy->payload_ptr, ptr->payload_ptr, sizeof(ptr->payload_ptr));
 		  head->next = cpy;
-		  assert(lru_insert_left(node_pptr, key, ptr->payload_ptr,
-					 sizeof(ptr->payload_ptr)) == true);		  
 		}
-	      free(ptr);
 	      return cpy;
 	    }
 	  else // doesn't exist
@@ -181,20 +181,17 @@ purge_all(lru_node_t **node_pptr)
   lru_node_t *ptr = *node_pptr;
 
   while (ptr != NULL) {
+    log_debug(DEBUG, "removing=%s", ptr->key);
+    ptr = (ptr == NULL) ? NULL : ptr->prev;
     free(ptr);
-    log_debug(DEBUG, "removeing ... %s", lru_get_key(ptr));
-    ptr = ptr->prev;
   }
 }
 
 void
 lru_remove_oldest(lru_node_t **node_pptr, int timeout)
 {
-  lru_node_t *ptr = *node_pptr,
-    *tail = lru_get_tail(node_pptr),
-    *next = tail->next;
-  time_t now;
-  
+  lru_node_t *tail = lru_get_tail(node_pptr), *next = tail->next;
+  time_t now;  
   time(&now);
   
   while(1)

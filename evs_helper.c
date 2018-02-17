@@ -12,26 +12,12 @@
 #include "evs_helper.h"
 #include "evs_log.h"
 #include "evs_internal.h"
-#include "evs_bst.h"
-
-  
-/* init dns cache */
-bst_t *dns_cache;
+#include "evs_lru.h"
 
 static char * hostcpy(char *dst, char *src, size_t s);
-static bst_t * init_dns_cache(void);
-
-
-static bst_t *
-init_dns_cache(void)
-{
-  dns_cache = new_bst((bst_cmp_t*)strcmp, NULL);
-  return dns_cache;
-}
-
 
 int
-resolve_host(socks_name_t *n)
+resolve_host(socks_name_t *n, lru_node_t **node)
 {  
   struct addrinfo hints, *res, *p;  
   struct sockaddr_in *sin;
@@ -55,17 +41,17 @@ resolve_host(socks_name_t *n)
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
-  /* This is temporary. 
-   *   TODO: 
-   *  non-blocking lookups 
-   */
+  lru_node_t *cached = lru_get_node(node, (void*)host, (lru_cmp_func*)strcmp);
+  /* Check if we already have the key entropy */
+  if (cached != NULL) {
+    log_info("cached=%s", cached->key);
+  }
+  
   if (getaddrinfo((char *)host, NULL, &hints, &res) != 0) {
     log_err("host not found");
     free(host);
     return -1;
   }
-
-  free(host);
  
   for (i =0, p =res; p != NULL; p = p->ai_next) {
     switch(p->ai_family) {
@@ -92,16 +78,10 @@ resolve_host(socks_name_t *n)
     break;
   }
 
-// #ifdef SOCKS_HAVE_INET6
-//   for (p =res; p != NULL; p = p->ai_next) {
-// 
-//     if (p->ai_family != AF_INET6)
-//       continue;
-//     
-//     memcpy(&n->sin6, p->ai_addr, p->ai_addrlen);
-//   }
-// #endif
-
+  if (lru_insert_left(node, host, (void*)n, sizeof(n)) != false) {
+    log_warn("lru_insert");
+  }
+  
   freeaddrinfo(res);  
   return 0;
 
@@ -109,7 +89,6 @@ resolve_host(socks_name_t *n)
   freeaddrinfo(res);
   return -1;
 }
-
 
 static char *
 hostcpy(char *dst, char *src, size_t s)
