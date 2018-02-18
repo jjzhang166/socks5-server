@@ -30,12 +30,16 @@ test1()
 
   lru_node_t *head = lru_get_head(&node);
   lru_node_t *tail = lru_get_tail(&node);
-  assert(strcmp(head->key, "second") == 0);
-  assert(strcmp(tail->key, "first") == 0);
+  if (strcmp(head->key, "second") != 0)
+    test_failed("key is wrong");
+  
+  if (strcmp(tail->key, "first") != 0)
+    test_failed("key is wrong");
   
   // Key doesn't exit, so returns NULL.
-  assert(lru_get_node(&node, "bar", (lru_cmp_func*)strcmp) == NULL);
-  
+  if (lru_get_node(&node, "bar", (lru_cmp_func*)strcmp) != NULL)
+    test_failed("key doesn't exist");
+
   purge_all(&node);
 }
 
@@ -58,10 +62,12 @@ void
 test2()
 {
   struct payload_s p;
+  
   memset(&p, 0, sizeof(p));
   
   p.key = "www";
   p.val = "wwvalue";
+  
   insert(&node_ptr, "a", &p);  
   insert(&node_ptr, "f", &p);
   insert(&node_ptr, "z", &p);

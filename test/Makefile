@@ -26,7 +26,7 @@ all: $(PROGRAMS)
 
 t:
 	$(Q)for t in $(PROGRAMS); do\
-		$$t;\
+		./$$t;\
 	done
 
 test_hostname: test_hostname.o

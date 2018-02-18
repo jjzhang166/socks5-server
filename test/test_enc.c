@@ -22,13 +22,14 @@ main()
   
   encryptor(buf, buf_len, key, key_len);
   
-  assert(!(buf == cpy));
-  test_ok("encrypt");
-  
+  if (buf == cpy)
+    test_ok("encrypt");
+ 
   encryptor(buf, buf_len, key, key_len);
 
-  assert(!(memcmp(buf, cpy, sizeof(buf))));  
+  if (memcmp(buf, cpy, sizeof(buf)) != 0)
+    test_failed("decrypt");
   test_ok("decrypt");
-
+  
   return 0;
 }
