@@ -26,14 +26,14 @@ resolve_host(socks_name_t *n, lru_node_t **node)
   char *host;
   int i;
 
-  host = (char*)malloc(n->len + 1);
+  host = (char*)malloc(n->hlen + 1);
 
   if (host == NULL) {
     log_err("malloc");
     return -1;
   }
   
-  (void) hostcpy(host, n->host, n->len);
+  (void) hostcpy(host, n->host, n->hlen);
   
   log_debug(DEBUG, "resolve: %s", host);
 
@@ -44,15 +44,20 @@ resolve_host(socks_name_t *n, lru_node_t **node)
   lru_node_t *cached = lru_get_node(node, (void*)host, (lru_cmp_func*)strcmp);
   /* Check if we already have the key entropy */
   if (cached != NULL) {
-    log_info("cached=%s", cached->key);
+    socks_name_t *nn = cached->payload_ptr;
+    log_debug(DEBUG, "cached=%s", cached->key);
+    *n = *nn;
+    return 0;
   }
-  
+
   if (getaddrinfo((char *)host, NULL, &hints, &res) != 0) {
     log_err("host not found");
     free(host);
     return -1;
   }
- 
+
+  free(host);
+  
   for (i =0, p =res; p != NULL; p = p->ai_next) {
     switch(p->ai_family) {
     case AF_INET:
@@ -63,25 +68,42 @@ resolve_host(socks_name_t *n, lru_node_t **node)
     }
     i++;
   }
-
+  
   if (i == 0) { /* no results */
     log_err("host not found");
     goto failed;
   }
 
+  n->addrs = malloc(i * sizeof(socks_addr_t));
+  if (n->addrs == NULL)
+    goto failed;
+
+  n->naddr = i;
+  i = 0;
+  
   for (p =res; p !=NULL; p =p->ai_next) {
 
     if (p->ai_family != AF_INET)
       continue;
 
-    memcpy(&n->sin, p->ai_addr, p->ai_addrlen);
+    sin = malloc(sizeof(struct sockaddr_in));
+    if (sin == NULL)
+      goto failed;
+
+    memcpy(sin, p->ai_addr, p->ai_addrlen);
+
+    sin->sin_port = n->port;
+    
+    n->addrs[i].sockaddr = (struct sockaddr*)sin;
+    n->addrs[i].socklen = p->ai_addrlen;
+
+    i++;
     break;
   }
 
-  if (lru_insert_left(node, host, (void*)n, sizeof(n)) != false) {
-    log_warn("lru_insert");
-  }
-  
+  if (!(lru_insert_left(node, n->host, (socks_name_t*)n, sizeof(n))))
+    log_warn("failed to insert %s", n->host);
+
   freeaddrinfo(res);  
   return 0;
 
