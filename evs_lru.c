@@ -42,11 +42,6 @@ lru_insert_left(lru_node_t **node_pptr, const char *key, void *data_p, size_t s)
 {
   lru_node_t *ptr = *node_pptr, *head = *node_pptr;
   time_t now = time(&now);
-
-  /* Check if we already have the key entropy */
-  if (lru_get_node(node_pptr, (void*)key, (lru_cmp_func*)strcmp) != NULL) {
-    return true;
-  }
   
   if (ptr != NULL)
     {
@@ -98,7 +93,6 @@ get_tail(lru_node_t **node_pptr)
 {
   lru_node_t *ptr = *node_pptr;
 
-  log_debug(DEBUG, "stack=%s", ptr->key);
   if (ptr->prev != NULL)
     return get_tail(&ptr->prev);
   return ptr;
@@ -179,10 +173,10 @@ void
 purge_all(lru_node_t **node_pptr)
 {
   lru_node_t *ptr = *node_pptr;
-
-  while (ptr != NULL) {
+     
+  if (ptr != NULL) {
     log_debug(DEBUG, "removing=%s", ptr->key);
-    ptr = (ptr == NULL) ? NULL : ptr->prev;
+    purge_all(&ptr->prev);
     free(ptr);
   }
 }
