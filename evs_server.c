@@ -36,15 +36,17 @@
 #include "evs_internal.h"
 #include "evs_log.h"
 #include "evs_helper.h"
+#include "evs_lru.h"
 #include "evs_encryptor.h"
 
+#define MAX_OUTPUT 1024 * 512
 
 static int status;
 static int yes_this_is_local;
 static int verbose_flag;
 static struct event_base *base;
 static struct evdns_base *evdns_base;
-
+static lru_node_t *dns_c;
 
 static void syntax(void);
 static void eventcb(struct bufferevent *bev, short what, void *ctx);
@@ -147,7 +149,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
   struct sockaddr_storage storage;
   
   /* name lookup stuff */
-  socks_name_t n;
+  socks_name_t *n;
   int domlen, buflen;
   char name;  
   
@@ -273,39 +275,47 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 	  break;	  
 	case DOMAINN:
 	  
-	  domlen = (size_t) buf[4];	  
+	  domlen = (u8) buf[4];	  
 	  buflen = (int) domlen + 5;
 
-	  n.host = buf + 5;
-	  n.len = domlen;
-	  n.bev = bev;
-	  n.family = AF_INET;
+	  /* extract 2 bytes port */
+	  memcpy(portbuf, buf + buflen, 2);
+	  port = portbuf[0]<<8 | portbuf[1];
 
-	  (void)resolvecb(&n);
+	  n = malloc(sizeof(socks_name_t));
+	  if (n == NULL) {
+	    log_err("malloc");
+	  }
+	  
+	  n->host = buf + 5;
+	  n->hlen = domlen;
+	  n->bev = bev;
+	  n->family = AF_INET;
+	  n->port = htons(port);
+ 
+	  (void)resolvecb(n);
 
 	  if (status == DNS_OK) {
 	    
 	    log_debug(DEBUG, "dns_ok");
 	    
 	    evbuffer_drain(src, buf_size);
-	      
-	    /* extract 2 bytes port */
-	    memcpy(portbuf, buf + buflen, 2);
-	    port = portbuf[0]<<8 | portbuf[1];
-	      
-	    n.sin.sin_family = AF_INET;
-	    n.sin.sin_port = htons(port);
-	  
-	    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&n.sin.sin_addr,
-				 abuf, sizeof(abuf))
-		== NULL) {
+
+	    struct sockaddr_in *ssin = (struct sockaddr_in*)n->addrs[0].sockaddr;
+	    ssin->sin_family = AF_INET;
+	    ssin->sin_port = htons(port);
+
+	    if (evutil_inet_ntop(AF_INET, (struct sockaddr*)&ssin->sin_addr,
+	    			 abuf, sizeof(abuf))
+	    	== NULL) {
 	      log_err("failed to resolve host");
 	      destroycb(bev);
 	      return;
 	    }
-	    log_info("connecting %s:%d", abuf, port);
+	    log_info("connecting to %s:%d", abuf, port);
+
 	    if (bufferevent_socket_connect(partner,
-	  				   (struct sockaddr*)&n.sin, sizeof(sin)) != 0)
+				   (struct sockaddr*)ssin, n->addrs[0].socklen) != 0)
 	      {
 	  	log_err("connect: failed to connect");
 	  	destroycb(bev);
@@ -342,7 +352,7 @@ socks_initcb(struct bufferevent *bev, void *ctx)
 static void
 resolvecb(socks_name_t *s)
 {
-  if (resolve_host(s) == 0) {
+  if (resolve_host(s, &dns_c) == 0) {
     status = DNS_OK;
   } else {
     destroycb(s->bev);
@@ -443,8 +453,6 @@ local_readcb(struct bufferevent *bev, void *ctx)
   bufferevent_enable(bev, EV_WRITE);
 }
 
-#define MAX_OUTPUT 1024 * 512
-
 static void
 readcb_from_target(struct bufferevent *bev, void *ctx)
 {
@@ -484,7 +492,6 @@ readcb_from_target(struct bufferevent *bev, void *ctx)
   }
 }
 
-
 static void
 drained_writecb(struct bufferevent *bev, void *ctx)
 {
@@ -500,7 +507,6 @@ drained_writecb(struct bufferevent *bev, void *ctx)
   bufferevent_enable(bev, EV_READ);
   
 }
-
 
 static void
 acceptcb(struct evconnlistener *listener,
@@ -521,13 +527,12 @@ acceptcb(struct evconnlistener *listener,
 				     sa, sizeof(struct sockaddr_in)) != 0)
 	log_errx(1, "connect: failed to connect");
     }
- 
-  assert(bev && partner);
-
+  
+  assert(bev && partner)
+    ;
   bufferevent_setcb(bev, socks_initcb, NULL, eventcb, partner);
   bufferevent_enable(bev, EV_READ|EV_WRITE);
 }
-
 
 static void
 signal_func(evutil_socket_t sig_flag, short what, void *ctx)
@@ -653,6 +658,9 @@ main(int c, char **v)
   
   base = event_base_new();
 
+  /* init cache  */
+  dns_c = init_lru();
+  
   if (yes_this_is_local)
     /* A server is requested running in local mode
        Server should connect to a remote server
