@@ -16,9 +16,9 @@ PROGRAM = esocks
 
 CC = gcc
 
-OBJ =  evs_server.o evs_log.o evs_helper.o evs_bst.o evs_encryptor.o
+OBJ =  evs_server.o evs_log.o evs_helper.o evs_lru.o evs_encryptor.o
 
-SRC =  evs_log.c evs_helper.c evs_server.c evs_bst.c evs_encryptor.c
+SRC =  evs_log.c evs_helper.c evs_server.c evs_lru.c evs_encryptor.c
 
 ifeq ($(DEBUG), yes)
 	DE = -DDEBUG=1 -g -DFAST_OPEN # debug and ready for gdb and fast-open
@@ -35,7 +35,7 @@ CFLAGS = -std=c99 \
 
 all: $(PROGRAM)
 
-esocks: evs_server.o evs_log.o evs_helper.o evs_bst.o evs_encryptor.o
+esocks: evs_server.o evs_log.o evs_helper.o evs_lru.o evs_encryptor.o
 	$(E) "  LINK    " $@
 	$(Q) $(CC)  $(CFLAGS) $(SRC) $(LIBS) -o $@
 

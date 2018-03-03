@@ -1,6 +1,8 @@
 
 * socks5 proxy server
 
+ **** a development is pending because of the job seeking ****
+ 
  SYNOPSIS
   # launch two servers like so:
   

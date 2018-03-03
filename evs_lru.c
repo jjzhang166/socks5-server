@@ -25,7 +25,8 @@ init_lru(void)
 
   node_ptr = (lru_node_t*)malloc(2 * sizeof(node_ptr)
 				 + sizeof(payload_t*) + sizeof(const char*)
-			     + sizeof(time_t) + sizeof(int));  
+				 + sizeof(time_t) + sizeof(int));
+  
   if (node_ptr != NULL)
     {
       node_ptr->next = NULL;
@@ -175,7 +176,9 @@ purge_all(lru_node_t **node_pptr)
   lru_node_t *ptr = *node_pptr;
      
   if (ptr != NULL) {
-    log_debug(DEBUG, "removing=%s", ptr->key);
+    if (ptr->key)
+      log_debug(DEBUG, "removing=%s", ptr->key);
+    
     purge_all(&ptr->prev);
     free(ptr);
   }
