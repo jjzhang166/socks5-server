@@ -21,8 +21,6 @@ resolve_host(socks_name_t *n, lru_node_t **node)
 {  
   struct addrinfo hints, *res, *p;  
   struct sockaddr_in *sin;
-  struct sockaddr_in6 *sin6;
-  u8 buf[128];
   char *host;
   int i;
 
