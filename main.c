@@ -27,8 +27,6 @@ static void parse_opt(srv_conf_t*, int, char**);
 int
 main(int c, char **v)
 {
-  int cc;
-  char opt;
   srv_conf_t conf;
 
   memset(&conf, 0, sizeof(conf));
@@ -54,7 +52,7 @@ main(int c, char **v)
 static
 void parse_opt(srv_conf_t *conf, int c, char **v)
 {
-  int cc;
+  int cc = 0;
   int port;
   
   while (cc != -1) {
